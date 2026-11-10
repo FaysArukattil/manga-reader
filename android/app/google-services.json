@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "356770181005",
+    "project_id": "shelfmark-13968",
+    "storage_bucket": "shelfmark-13968.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:356770181005:android:c08cbd706520bfd6e597c4",
+        "android_client_info": {
+          "package_name": "com.faysarukattil.shelfmark"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "356770181005-nkf2e1vugskhoehlbfv5hscm932o549p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.faysarukattil.shelfmark",
+            "certificate_hash": "0273aee0664692990a741ee6351ebf82b80be6b1"
+          }
+        },
+        {
+          "client_id": "356770181005-2bs6ir063l5j5poikie5qtkmssma9h0s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAe0kgzIKCYY_27SGeeOiCH41uHrEc7KMY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "356770181005-2bs6ir063l5j5poikie5qtkmssma9h0s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+
