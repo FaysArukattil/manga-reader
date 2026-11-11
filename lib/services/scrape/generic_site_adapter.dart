@@ -558,7 +558,34 @@ class GenericSiteAdapter implements SiteAdapter {
       if (lower.contains(ad)) return true;
     }
 
+    if (RegExp(
+      r'(adsterra|exoclick|syndication|mobicow|popads|propeller|clickadu|hilltopads|highperformanceformat|profitablecpmrate|effectivegatecpm|tsyndicate|ad-maven|admaven|histats|mgid|taboola|outbrain|zergnet|disqus|monetag|yadro|dtscout|trafficjunky|trafficfactory|coinhive|crypto|casino|1xbet|melbet|bidgear|clksite|bonus|banner_ad|ad_banner)',
+      caseSensitive: false,
+    ).hasMatch(lower)) {
+      return true;
+    }
+
     if (_hasJunkToken(url, _junkTokens)) return true;
+
+    // Filter out parent ad containers
+    dom.Element? cur = img.parent;
+    for (var i = 0; i < 4 && cur != null; i++) {
+      final pCls = (cur.attributes['class'] ?? '').toLowerCase();
+      final pId = (cur.attributes['id'] ?? '').toLowerCase();
+      if (pCls.contains('adsbygoogle') ||
+          pCls.contains('ad-box') ||
+          pCls.contains('ad-slot') ||
+          pCls.contains('ad-wrapper') ||
+          pCls.contains('ad-container') ||
+          pCls.contains('banner-ad') ||
+          pCls.contains('advertisement') ||
+          pCls.contains('code-block') ||
+          pId.contains('adsbygoogle') ||
+          pId.contains('banner-ad')) {
+        return true;
+      }
+      cur = cur.parent;
+    }
 
     // Filter out thumbnail/avatar/widget classes
     final cls = (img.attributes['class'] ?? '').toLowerCase();
@@ -582,9 +609,15 @@ class GenericSiteAdapter implements SiteAdapter {
 
     final width = int.tryParse(img.attributes['width'] ?? '');
     final height = int.tryParse(img.attributes['height'] ?? '');
-    if ((width != null && width > 0 && width < 220) ||
-        (height != null && height > 0 && height < 220)) {
+    if ((width != null && width > 0 && width < 180) ||
+        (height != null && height > 0 && height < 180)) {
       return true;
+    }
+
+    // Skip horizontal banner ads (e.g. 728x90, 468x60, 320x50)
+    if (width != null && height != null && width > 0 && height > 0) {
+      if (width / height > 3.2 || (height < 130 && width > 250)) return true;
+      if ((width - 300).abs() < 40 && (height - 250).abs() < 40) return true;
     }
 
     return false;

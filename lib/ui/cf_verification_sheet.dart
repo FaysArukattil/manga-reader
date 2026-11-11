@@ -96,17 +96,22 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
 
     // Lazy / SPA readers render pages as you scroll: step down the page and
     // keep reading until the list stops growing.
-    var pages = <String>[];
-    var last = -1;
+    // Read pages with quick scrolling so lazy-loading images populate fast
+    var pages = await _readPages();
+    var last = pages.length;
     var stable = 0;
     var bottom = false;
-    for (var i = 0; i < 40; i++) {
+    for (var i = 0; i < 20; i++) {
+      if (pages.length >= 2 &&
+          (bottom && stable >= 2 || pages.length >= 10 && stable >= 2)) {
+        break;
+      }
       try {
         final atBottom =
             await _web?.evaluateJavascript(source: WebScraper.scrollStepJs);
         if (atBottom == true) bottom = true;
       } catch (_) {}
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 180));
       pages = await _readPages();
       if (pages.length == last) {
         stable++;
@@ -114,8 +119,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
         stable = 0;
         last = pages.length;
       }
-      if (pages.length >= 2 && bottom && stable >= 3) break;
-      if (pages.length < 2 && bottom && stable >= 6) break;
+      if (pages.length < 2 && bottom && stable >= 4 && i >= 6) break;
     }
 
     String? next, prev, title;

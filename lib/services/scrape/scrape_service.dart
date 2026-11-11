@@ -308,7 +308,7 @@ class ScrapeService {
     /// until the page list stops growing (or reaches the page count the site
     /// announces).
     Future<void> runExtraction(InAppWebViewController c) async {
-      final deadline = DateTime.now().add(const Duration(seconds: 40));
+      final deadline = DateTime.now().add(const Duration(seconds: 18));
       var pages = <String>[];
       var lastCount = -1;
       var stable = 0;
@@ -326,10 +326,9 @@ class ScrapeService {
             challengeSeen = true;
             stillChallenge = true;
             challengeAttempts++;
-            // If the challenge does not auto-resolve in ~4 seconds (6 attempts * 700ms),
+            // If the challenge does not auto-resolve in ~6 seconds (9 attempts * 700ms),
             // it is an interactive Turnstile / human check requiring user interaction.
-            // Yield immediately to the in-app verification screen instead of hanging at 100%!
-            if (challengeAttempts >= 6) {
+            if (challengeAttempts >= 9) {
               CfDiag.log(
                 'headless interactive challenge detected ($challengeAttempts attempts) -> requesting user verification',
               );
@@ -380,7 +379,6 @@ class ScrapeService {
                   (pages.length >= 8 && stable >= 2))) {
             break;
           }
-          if (pages.length < 2 && bottom && stable >= 4) break;
         } catch (_) {
           // Navigation / reload in progress; try again.
           await Future<void>.delayed(const Duration(milliseconds: 220));
@@ -389,10 +387,22 @@ class ScrapeService {
 
       if (completer.isCompleted) return;
 
-      if (stillChallenge && pages.length < 2) {
-        challengeSeen = true;
+      if ((stillChallenge || challengeSeen) && pages.length < 2) {
         finish(_needsVerification(url));
         return;
+      }
+
+      if (pages.length < 2) {
+        try {
+          final title = (await c.getTitle() ?? '').toLowerCase();
+          if (title.contains('moment') ||
+              title.contains('cloudflare') ||
+              title.contains('human') ||
+              title.contains('attention')) {
+            finish(_needsVerification(url));
+            return;
+          }
+        } catch (_) {}
       }
 
       try {
@@ -468,6 +478,14 @@ class ScrapeService {
       initialSize: const Size(1080, 1920),
       initialUrlRequest: URLRequest(url: WebUri(url)),
       initialSettings: settings,
+      onProgressChanged: (controller, progress) async {
+        if (completer.isCompleted || started) return;
+        if (progress >= 75) {
+          started = true;
+          CfDiag.log('headless progress $progress% on ${uri.host} -> starting extraction');
+          await runExtraction(controller);
+        }
+      },
       onLoadStop: (controller, loadedUrl) async {
         if (completer.isCompleted || started) return;
         started = true;
@@ -484,14 +502,24 @@ class ScrapeService {
 
     await headless!.run();
 
-    // Page never finished loading: hand over to the visible verification
-    // screen instead of hanging.
-    quietTimer = Timer(const Duration(seconds: 25), () {
-      if (!started) finish(_needsVerification(url));
+    // Fast-start fallback timer: don't wait for slow tracking scripts to finish!
+    Timer(const Duration(milliseconds: 2800), () async {
+      if (!completer.isCompleted && !started && headless != null) {
+        final c = headless!.webViewController;
+        if (c != null) {
+          started = true;
+          CfDiag.log('headless fallback timer triggered on ${uri.host}');
+          await runExtraction(c);
+        }
+      }
+    });
+
+    quietTimer = Timer(const Duration(seconds: 18), () {
+      if (!completer.isCompleted) finish(_needsVerification(url));
     });
 
     return completer.future.timeout(
-      const Duration(seconds: 70),
+      const Duration(seconds: 20),
       onTimeout: () {
         CfDiag.log('headless timeout challengeSeen=$challengeSeen $url');
         final r = _needsVerification(url);

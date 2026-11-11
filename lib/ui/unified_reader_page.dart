@@ -581,6 +581,8 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                         pageFlipEffect: state.pageFlipEffect,
                         soundEffect: state.soundEffect,
                         isAllCaughtUp: state.isAllCaughtUp,
+                        loadingNextChapter: state.loadingNextChapter,
+                        series: widget.series,
                         caughtUp: _CaughtUpCard(
                           checking: state.checkingForNew,
                           needsVerification: state.nextVerificationUrl != null,
@@ -808,6 +810,8 @@ class _StreamPager extends StatefulWidget {
     required this.pageFlipEffect,
     required this.soundEffect,
     required this.isAllCaughtUp,
+    required this.loadingNextChapter,
+    required this.series,
     required this.caughtUp,
     required this.onPageChanged,
     required this.onCenterTap,
@@ -822,6 +826,8 @@ class _StreamPager extends StatefulWidget {
   final bool pageFlipEffect;
   final bool soundEffect;
   final bool isAllCaughtUp;
+  final bool loadingNextChapter;
+  final Series series;
   final Widget caughtUp;
   final ValueChanged<int> onPageChanged;
   final VoidCallback onCenterTap;
@@ -831,7 +837,9 @@ class _StreamPager extends StatefulWidget {
 }
 
 class _StreamPagerState extends State<_StreamPager> {
-  int get _count => widget.pages.length + (widget.isAllCaughtUp ? 1 : 0);
+  int get _count =>
+      widget.pages.length +
+      ((widget.isAllCaughtUp || widget.loadingNextChapter) ? 1 : 0);
   int? _lastSoundPage;
 
   @override
@@ -851,6 +859,17 @@ class _StreamPagerState extends State<_StreamPager> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_syncFromPageController);
       widget.controller.addListener(_syncFromPageController);
+    }
+    // If next chapter pages arrived while reader was on the loading card
+    if (widget.pages.length > oldWidget.pages.length) {
+      final currentPos = widget.vertical
+          ? (widget.controller.hasClients
+              ? widget.controller.page?.round()
+              : null)
+          : widget.turnController.currentPage;
+      if (currentPos != null && currentPos >= oldWidget.pages.length) {
+        widget.onPageChanged(oldWidget.pages.length);
+      }
     }
   }
 
@@ -931,6 +950,12 @@ class _StreamPagerState extends State<_StreamPager> {
 
   Widget _buildPageItem(BuildContext context, int i) {
     if (i == widget.pages.length) {
+      if (widget.loadingNextChapter) {
+        return _NextChapterLoadingCard(
+          series: widget.series,
+          vertical: widget.vertical,
+        );
+      }
       return widget.caughtUp;
     }
 
@@ -1604,6 +1629,320 @@ class _CaughtUpCard extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// --------------------------------------------- next chapter loading card
+
+class _NextChapterLoadingCard extends StatefulWidget {
+  const _NextChapterLoadingCard({
+    required this.series,
+    this.vertical = false,
+  });
+
+  final Series series;
+  final bool vertical;
+
+  @override
+  State<_NextChapterLoadingCard> createState() => _NextChapterLoadingCardState();
+}
+
+class _NextChapterLoadingCardState extends State<_NextChapterLoadingCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  Timer? _stageTimer;
+  int _stageIndex = 0;
+
+  static const List<({String title, String detail, IconData icon})> _stages = [
+    (
+      title: 'Connecting to host',
+      detail: 'Establishing secure content pipeline...',
+      icon: Icons.wifi_tethering_rounded,
+    ),
+    (
+      title: 'Bypassing site protection',
+      detail: 'Verifying Cloudflare clearance tokens...',
+      icon: Icons.shield_rounded,
+    ),
+    (
+      title: 'Stripping advertisements',
+      detail: 'Purifying layout & filtering rogue trackers...',
+      icon: Icons.auto_awesome_rounded,
+    ),
+    (
+      title: 'Decrypting chapter stream',
+      detail: 'Extracting high-definition manga pages...',
+      icon: Icons.menu_book_rounded,
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+
+    _stageTimer = Timer.periodic(const Duration(milliseconds: 1600), (t) {
+      if (mounted) {
+        setState(() {
+          _stageIndex = (_stageIndex + 1) % _stages.length;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _stageTimer?.cancel();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const mint = Color(0xFF00FFA3);
+    final currentStage = _stages[_stageIndex];
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF07080C),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Background cover artwork blur
+          if (widget.series.coverUrl?.isNotEmpty == true)
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.16,
+                child: CachedNetworkImage(
+                  imageUrl: widget.series.coverUrl!,
+                  cacheKey: widget.series.coverUrl!,
+                  cacheManager: PageCache.instance,
+                  httpHeaders: CfSession.imageHeaders(
+                    widget.series.coverUrl!,
+                    widget.series.url.isNotEmpty ? widget.series.url : null,
+                  ),
+                  fit: BoxFit.cover,
+                  errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+
+          // Vignette & gradient background
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment(0, -0.15),
+                    radius: 1.15,
+                    colors: [
+                      Color(0x7507080C),
+                      Color(0xDD07080C),
+                      Color(0xFF07080C),
+                    ],
+                    stops: [0.0, 0.65, 1.0],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Main HUD
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Top Security Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: mint.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: mint.withValues(alpha: 0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(
+                                color: mint,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: mint,
+                                    blurRadius: 6,
+                                    spreadRadius: 1,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'AUTOMATED PIPELINE',
+                              style: TextStyle(
+                                color: mint,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+
+                      // Pulsing Security Shield Icon
+                      AnimatedBuilder(
+                        animation: _pulseController,
+                        builder: (context, child) {
+                          final scale = 1.0 + (_pulseController.value * 0.06);
+                          final glowAlpha =
+                              0.2 + (_pulseController.value * 0.25);
+                          return Transform.scale(
+                            scale: scale,
+                            child: Container(
+                              width: 88,
+                              height: 88,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: const Color(0xFF0E131F),
+                                border: Border.all(
+                                  color: mint.withValues(alpha: 0.5),
+                                  width: 1.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: mint.withValues(alpha: glowAlpha),
+                                    blurRadius: 28,
+                                    spreadRadius: 2,
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  currentStage.icon,
+                                  color: mint,
+                                  size: 40,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 28),
+
+                      // Title
+                      const Text(
+                        'Loading Next Chapter...',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        widget.series.title,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Dynamic Progress / Stage status with smooth transition
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 350),
+                        transitionBuilder: (child, anim) => FadeTransition(
+                          opacity: anim,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.15),
+                              end: Offset.zero,
+                            ).animate(anim),
+                            child: child,
+                          ),
+                        ),
+                        child: Column(
+                          key: ValueKey(_stageIndex),
+                          children: [
+                            Text(
+                              currentStage.title,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFFE6E8EE),
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              currentStage.detail,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.45),
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+
+                      // Glowing Shimmer Progress Bar
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          height: 4,
+                          width: 220,
+                          color: Colors.white10,
+                          child: const LinearProgressIndicator(
+                            backgroundColor: Colors.transparent,
+                            valueColor: AlwaysStoppedAnimation<Color>(mint),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      Text(
+                        widget.vertical
+                            ? 'Scroll back up to return to current chapter'
+                            : 'Swipe back to return to current chapter',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.28),
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

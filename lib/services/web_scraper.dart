@@ -73,9 +73,12 @@ class WebScraper {
       button:1, badge:1, badges:1, discord:1, telegram:1, facebook:1, twitter:1, patreon:1,
       donate:1, loading:1, spinner:1, placeholder:1, ads:1, ad:1, advert:1, advertisement:1,
       widget:1, header:1, footer:1, rating:1, emoji:1, sprite:1, favicon:1, thumb:1,
-      thumbs:1, thumbnail:1, thumbnails:1, cover:1};
+      thumbs:1, thumbnail:1, thumbnails:1, cover:1, promo:1, sponsor:1, sponsored:1,
+      affiliate:1, campaign:1, popunder:1, popup:1, tracking:1, analytics:1,
+      pixel:1, stat:1, stats:1, counter:1, counter_img:1};
     function isJunkUrl(u) {
       try {
+        if (/adsterra|exoclick|syndication|mobicow|popads|propeller|clickadu|hilltopads|highperformanceformat|profitablecpmrate|effectivegatecpm|tsyndicate|ad-maven|admaven|histats|mgid|taboola|outbrain|zergnet|disqus|monetag|yadro|dtscout|trafficjunky|trafficfactory|coinhive|crypto|casino|1xbet|melbet|bidgear|clksite|bonus|banner_ad|ad_banner/i.test(u)) return true;
         var p = new URL(u);
         var toks = (p.hostname + p.pathname).toLowerCase().split(/[^a-z0-9]+/);
         for (var i = 0; i < toks.length; i++) { if (JUNK[toks[i]]) return true; }
@@ -154,9 +157,19 @@ class WebScraper {
         var img = list[i];
         var u = srcOf(img);
         if (!u || seen[u] || isJunkUrl(u)) continue;
+
+        // Skip ads inside known ad wrappers
+        if (img.closest && img.closest('ins, iframe, .adsbygoogle, .ad-box, .ad-slot, .ad-wrapper, .ad-container, .banner-ad, .ad-unit, .code-block, .widget_text, [class*="advertisement"], [id*="advertisement"], [class*="sponsored"], [id*="sponsored"]')) continue;
+
         var w = img.naturalWidth || parseInt(img.getAttribute('width')) || 0;
         var h = img.naturalHeight || parseInt(img.getAttribute('height')) || 0;
-        if ((w > 0 && w < 160) && (h > 0 && h < 160)) continue;
+        // Skip tiny icons / trackers
+        if ((w > 0 && w < 180) && (h > 0 && h < 180)) continue;
+        // Skip horizontal banner ads (e.g. 728x90, 468x60, 320x50, 300x50)
+        if (w > 0 && h > 0 && (w / h > 3.2 || (h < 130 && w > 250))) continue;
+        // Skip square / medium rectangle ad boxes (e.g. 300x250, 336x280)
+        if (w > 0 && h > 0 && Math.abs(w - 300) < 40 && Math.abs(h - 250) < 40) continue;
+
         seen[u] = true;
         out.push({el: img, url: u, w: w, h: h});
       }
