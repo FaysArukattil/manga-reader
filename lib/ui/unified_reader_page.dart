@@ -1199,6 +1199,8 @@ class _PageImage extends StatefulWidget {
 
 class _PageImageState extends State<_PageImage> {
   final ScrollController _scrollController = ScrollController();
+  int _retryNonce = 0;
+  int _autoRetries = 0;
   double _dragStartY = 0;
   DateTime _dragStartTime = DateTime.now();
 
@@ -1230,9 +1232,10 @@ class _PageImageState extends State<_PageImage> {
           final hasScroll = _scrollController.hasClients &&
               _scrollController.position.haveDimensions &&
               _scrollController.position.maxScrollExtent > 40;
-          final atBottom = hasScroll &&
-              _scrollController.offset >=
-                  _scrollController.position.maxScrollExtent - 25;
+          final atBottom = !hasScroll ||
+              (_scrollController.hasClients &&
+                  _scrollController.offset >=
+                      _scrollController.position.maxScrollExtent - 25);
           final showHint = hasScroll && !atBottom;
 
           return Stack(
@@ -1279,19 +1282,103 @@ class _PageImageState extends State<_PageImage> {
                           minHeight: constraints.maxHeight,
                         ),
                         child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (final sliceUrl in widget.item.allUrls)
-                                _PageSliceImage(
-                                  key: ValueKey(sliceUrl),
-                                  url: sliceUrl,
+                          child: widget.item.allUrls.length <= 1
+                              ? CachedNetworkImage(
+                                  key: ValueKey('${widget.item.pageKey}#$_retryNonce'),
+                                  imageUrl: widget.item.url,
+                                  cacheKey: widget.item.pageKey,
+                                  cacheManager: PageCache.instance,
+                                  httpHeaders: CfSession.imageHeaders(
+                                    widget.item.url,
+                                    widget.item.referer,
+                                  ),
+                                  fadeInDuration: Duration.zero,
+                                  fadeOutDuration: Duration.zero,
                                   width: constraints.maxWidth,
-                                  referer: widget.item.referer,
+                                  fit: BoxFit.fitWidth,
+                                  imageBuilder: (context, imageProvider) {
+                                    return Image(
+                                      image: imageProvider,
+                                      width: constraints.maxWidth,
+                                      fit: BoxFit.fitWidth,
+                                      filterQuality: FilterQuality.medium,
+                                    );
+                                  },
+                                  placeholder: (_, __) => SizedBox(
+                                    height: constraints.maxHeight,
+                                    child: const Center(
+                                      child: SizedBox(
+                                        width: 28,
+                                        height: 28,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white24,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  errorWidget: (_, url, error) {
+                                    CfDiag.log('image failed ${Uri.tryParse(url)?.host}: $error');
+                                    if (_autoRetries < 1) {
+                                      _autoRetries++;
+                                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                                        await PageCache.instance.removeFile(widget.item.pageKey);
+                                        if (mounted) setState(() => _retryNonce++);
+                                      });
+                                      return SizedBox(
+                                        height: constraints.maxHeight,
+                                        child: const Center(
+                                          child: SizedBox(
+                                            width: 28,
+                                            height: 28,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white24,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.broken_image_rounded, color: Colors.white30, size: 36),
+                                            const SizedBox(height: 8),
+                                            const Text("This page didn't load", style: TextStyle(color: Colors.white54, fontSize: 13)),
+                                            const SizedBox(height: 12),
+                                            OutlinedButton(
+                                              onPressed: () async {
+                                                await PageCache.instance.removeFile(widget.item.pageKey);
+                                                if (mounted) setState(() => _retryNonce++);
+                                              },
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: Colors.white70,
+                                                side: const BorderSide(color: Colors.white24),
+                                              ),
+                                              child: const Text('Retry'),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                )
+                              : Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    for (final sliceUrl in widget.item.allUrls)
+                                      _PageSliceImage(
+                                        key: ValueKey(sliceUrl),
+                                        url: sliceUrl,
+                                        width: constraints.maxWidth,
+                                        referer: widget.item.referer,
+                                      ),
+                                  ],
                                 ),
-                            ],
-                          ),
                         ),
                       ),
                     ),

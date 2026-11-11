@@ -20,18 +20,6 @@ class ScrapeService {
   final http.Client _client;
   final List<SiteAdapter> _adapters = [const GenericSiteAdapter()];
 
-  /// Chapters whose fast-path result was incomplete (lazy readers only put
-  /// the first few pages in the HTML). Returned as a last resort but never
-  /// written to the disk cache.
-  final Set<String> _partialUrls = {};
-
-  /// "13 pages" style hint in server HTML; 0 when absent.
-  static int _expectedPageCount(String html) {
-    final m = RegExp(r'(\d{1,4})\s*pages\b', caseSensitive: false)
-        .firstMatch(html.length > 400000 ? html.substring(0, 400000) : html);
-    return m == null ? 0 : (int.tryParse(m.group(1)!) ?? 0);
-  }
-
   /// The real WebView user-agent (see CfSession). It must be identical for the
   /// verification WebView, the headless scraper, HTTP and image downloads,
   /// otherwise Cloudflare's cf_clearance cookie stops being valid.
@@ -80,10 +68,8 @@ class ScrapeService {
       }
     }
 
-    _partialUrls.remove(url);
     final result = await _scrapeChapter(url);
-    final isPartial = _partialUrls.remove(url);
-    if (result.pages.length >= 2 && !result.needsVerification && !isPartial) {
+    if (result.pages.length >= 2 && !result.needsVerification) {
       await ScrapeCache.instance.put(url, result);
       if (result.chapterUrl != url) {
         await ScrapeCache.instance.put(result.chapterUrl, result);
@@ -127,7 +113,6 @@ class ScrapeService {
     }
 
     final adapter = _adapterFor(uri.host);
-    ScrapedChapterResult? partial;
 
     // ------------------------------------------------------------- 1. Fast Path
     // Skipped for hosts that already challenged plain HTTP: Dart's HTTP client
@@ -167,17 +152,7 @@ class ScrapeService {
           if (result.needsVerification) {
             CfSession.webViewOnlyHosts.add(uri.host);
           } else if (result.pages.length >= 2) {
-            final expected = _expectedPageCount(response.body);
-            if (expected <= result.pages.length) {
-              return result; // Fast path succeeded!
-            }
-            // Lazy reader: the HTML only held the first few pages. Render it
-            // in the WebView to get all of them; keep this as a fallback.
-            CfDiag.log(
-              'fast path incomplete ${uri.host} '
-              '${result.pages.length}/$expected -> rendering',
-            );
-            partial = result;
+            return result; // Fast path succeeded! Return immediately.
           } else {
             // Series overview page? Auto-hop to the first available chapter.
             final targetUrl = result.firstChapterUrl ??
@@ -198,7 +173,13 @@ class ScrapeService {
             }
           }
         } else if (response.statusCode == 403 || response.statusCode == 503) {
-          CfSession.webViewOnlyHosts.add(uri.host);
+          if (CfSession.isChallengeResponse(
+            response.statusCode,
+            response.headers,
+            response.body,
+          )) {
+            CfSession.webViewOnlyHosts.add(uri.host);
+          }
         }
       } catch (_) {
         // Fall through to rendered path
@@ -232,11 +213,6 @@ class ScrapeService {
       }
     } catch (e) {
       CfDiag.log('rendered path failed ${uri.host}: $e');
-    }
-
-    if (partial != null) {
-      _partialUrls.add(url);
-      return partial;
     }
 
     // Fallback: return best effort or stepChapter

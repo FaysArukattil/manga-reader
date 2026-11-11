@@ -46,7 +46,7 @@ class ReaderPageItem {
     final count = rawPages.length;
 
     int groupSize = 1;
-    if (count >= 36) {
+    if (count >= 60) {
       groupSize = (count / 28).round().clamp(1, 6);
     }
 

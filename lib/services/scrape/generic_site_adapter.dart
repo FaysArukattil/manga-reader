@@ -119,8 +119,40 @@ class GenericSiteAdapter implements SiteAdapter {
       }
       for (final img in imgElements) {
         final resolved = _extractImgSrc(img, pageUri);
-        if (resolved != null && !_isJunk(resolved, img)) {
+        if (resolved != null && !_isJunk(resolved, img, insideReader: true)) {
           addPage(resolved);
+        }
+      }
+    }
+
+    // 3b. Direct reader page queries across known reader selectors
+    if (pages.length < 2) {
+      const directSelectors = [
+        '.reading-content img',
+        '.wp-manga-chapter-img',
+        '.page-break img',
+        '#readerarea img',
+        '.container-chapter-reader img',
+        '#chapter-content img',
+        '#chapterimages img',
+        '.chapter-images img',
+        '.read-container img',
+        '.viewer-cnt img',
+        '#divImage img',
+        '.comic-page img',
+        '.entry-content img',
+        '.scan-page img',
+      ];
+      for (final sel in directSelectors) {
+        final found = document.querySelectorAll(sel);
+        if (found.length >= 2) {
+          for (final img in found) {
+            final resolved = _extractImgSrc(img, pageUri);
+            if (resolved != null && !_isJunk(resolved, img, insideReader: true)) {
+              addPage(resolved);
+            }
+          }
+          if (pages.length >= 2) break;
         }
       }
     }
@@ -196,6 +228,7 @@ class GenericSiteAdapter implements SiteAdapter {
         img.attributes['data-lazy-src'] ??
         img.attributes['data-original'] ??
         img.attributes['data-cfsrc'] ??
+        img.attributes['data-wpfc-original-src'] ??
         img.attributes['data-url'] ??
         img.attributes['data-cdn'] ??
         img.attributes['data-full-url'] ??
@@ -207,7 +240,9 @@ class GenericSiteAdapter implements SiteAdapter {
         img.attributes['src'];
 
     if (rawSrc == null || rawSrc.trim().isEmpty) {
-      final srcset = img.attributes['srcset'];
+      final srcset = img.attributes['data-lazy-srcset'] ??
+          img.attributes['data-srcset'] ??
+          img.attributes['srcset'];
       if (srcset != null && srcset.isNotEmpty) {
         rawSrc = srcset.split(',').last.trim().split(' ').first;
       }
@@ -550,7 +585,7 @@ class GenericSiteAdapter implements SiteAdapter {
     return url;
   }
 
-  bool _isJunk(String url, dom.Element img) {
+  bool _isJunk(String url, dom.Element img, {bool insideReader = false}) {
     final lower = url.toLowerCase();
 
     // Check ad blockers domain list
@@ -598,7 +633,10 @@ class GenericSiteAdapter implements SiteAdapter {
       return true;
     }
 
-    // Check if inside a chapter link (e.g. <a href="/chapter-12"><img ...></a>)
+    // Inside reader container: pages and slices are valid content!
+    if (insideReader) return false;
+
+    // Check if inside a chapter link (e.g. <a href="/chapter-12"><img ...></a>) outside reader
     final parent = img.parent;
     if (parent != null && parent.localName == 'a') {
       final parentHref = (parent.attributes['href'] ?? '').toLowerCase();
@@ -609,14 +647,14 @@ class GenericSiteAdapter implements SiteAdapter {
 
     final width = int.tryParse(img.attributes['width'] ?? '');
     final height = int.tryParse(img.attributes['height'] ?? '');
-    if ((width != null && width > 0 && width < 180) ||
+    if ((width != null && width > 0 && width < 180) &&
         (height != null && height > 0 && height < 180)) {
       return true;
     }
 
-    // Skip horizontal banner ads (e.g. 728x90, 468x60, 320x50)
+    // Skip horizontal banner ads (e.g. 728x90, 468x60, 320x50), but never wide webtoon strips
     if (width != null && height != null && width > 0 && height > 0) {
-      if (width / height > 3.2 || (height < 130 && width > 250)) return true;
+      if (width < 500 && (width / height > 3.2 || (height < 130 && width > 250))) return true;
       if ((width - 300).abs() < 40 && (height - 250).abs() < 40) return true;
     }
 

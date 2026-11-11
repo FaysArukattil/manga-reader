@@ -151,7 +151,7 @@ class WebScraper {
       '.wp-manga-chapter-img', '.entry-content', '.page-break'
     ];
     var items = [];
-    function collect(list) {
+    function collect(list, insideReader) {
       var out = [];
       var seen = {};
       for (var i = 0; i < list.length; i++) {
@@ -164,12 +164,15 @@ class WebScraper {
 
         var w = img.naturalWidth || parseInt(img.getAttribute('width')) || 0;
         var h = img.naturalHeight || parseInt(img.getAttribute('height')) || 0;
-        // Skip tiny icons / trackers
-        if ((w > 0 && w < 180) && (h > 0 && h < 180)) continue;
-        // Skip horizontal banner ads (e.g. 728x90, 468x60, 320x50, 300x50)
-        if (w > 0 && h > 0 && (w / h > 3.2 || (h < 130 && w > 250))) continue;
-        // Skip square / medium rectangle ad boxes (e.g. 300x250, 336x280)
-        if (w > 0 && h > 0 && Math.abs(w - 300) < 40 && Math.abs(h - 250) < 40) continue;
+
+        if (!insideReader) {
+          // Skip tiny icons / trackers
+          if ((w > 0 && w < 180) && (h > 0 && h < 180)) continue;
+          // Skip horizontal banner ads (never drop wide webtoon strips)
+          if (w > 0 && h > 0 && w < 500 && (w / h > 3.2 || (h < 130 && w > 250))) continue;
+          // Skip square / medium rectangle ad boxes (e.g. 300x250, 336x280)
+          if (w > 0 && h > 0 && Math.abs(w - 300) < 40 && Math.abs(h - 250) < 40) continue;
+        }
 
         seen[u] = true;
         out.push({el: img, url: u, w: w, h: h});
@@ -193,7 +196,7 @@ class WebScraper {
       '.entry-content img'
     ];
     for (var i = 0; i < pageSelectors.length; i++) {
-      var found = collect(document.querySelectorAll(pageSelectors[i]));
+      var found = collect(document.querySelectorAll(pageSelectors[i]), true);
       if (found.length >= 2) { items = found; break; }
     }
 
@@ -201,7 +204,7 @@ class WebScraper {
       for (var i = 0; i < containerSelectors.length; i++) {
         var c = document.querySelector(containerSelectors[i]);
         if (c) {
-          var got = collect(c.querySelectorAll('img'));
+          var got = collect(c.querySelectorAll('img'), true);
           if (got.length >= 2) { items = got; break; }
         }
       }
@@ -210,7 +213,7 @@ class WebScraper {
     // 2. Fallback for SPA readers with unknown markup: pick the group of
     //    sibling images that looks most like a run of pages.
     if (items.length < 2) {
-      var all = collect(document.querySelectorAll('img'));
+      var all = collect(document.querySelectorAll('img'), false);
       var groups = [];
       for (var d = 1; d <= 3; d++) {
         var map = new Map();
