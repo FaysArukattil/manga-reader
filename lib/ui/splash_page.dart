@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -20,19 +19,25 @@ const _kPaperShade = Color(0xFFD9D1C0);
 const _kInk = Color(0xFF14110F);
 
 // ===========================================================================
-// TIMELINE (0..1 over the controller)
-//   0.00-0.20  panel frame draws, book pops in, rumble SFX
-//   0.10-0.42  cover swings open (real 3D hinge)
-//   0.36-0.64  manga pages flip one after another
-//   0.62       IMPACT: flash, shake, speed-line burst, logo erupts, ドン!!
-//   0.74-1.00  title letters slam in, brush slash, tagline
+// TIMELINE  (all values are SECONDS, so tuning is easy)
+//
+//   0.00-0.40  book pops in
+//   0.12-0.62  cover swings open
+//   0.55-1.15  three manga pages riffle over (evenly staggered)
+//   1.20       IMPACT: flash, shake, speed-line burst, logo erupts, BOOM!!
+//   1.50-2.10  title letters slam in, brush slash, tagline
+//   2.10-3.50  the logo "hero hold": floating logo, twinkles, light beam,
+//              pulsing glow, ambient speed lines
+//   3.50+0.40  short beat, then continue to the app
 // ===========================================================================
-const _kImpact = 0.62;
+const _kDur = 3.5;
+const _kHoldMs = 400;
+const _kImpact = 1.2;
 
-double _seg(double t, double a, double b, [Curve c = Curves.linear]) {
-  if (t <= a) return 0;
-  if (t >= b) return 1;
-  return c.transform((t - a) / (b - a));
+double _seg(double s, double a, double b, [Curve c = Curves.linear]) {
+  if (s <= a) return 0;
+  if (s >= b) return 1;
+  return c.transform((s - a) / (b - a));
 }
 
 // ===========================================================================
@@ -50,26 +55,27 @@ class _SplashPageState extends State<SplashPage>
   late final AnimationController _c;
   late final Animation<double> _halftoneFade;
   bool _hit = false;
+  bool _navigating = false;
 
   @override
   void initState() {
     super.initState();
     _c = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 3300),
+      duration: Duration(milliseconds: (_kDur * 1000).round()),
     );
     _halftoneFade = CurvedAnimation(
       parent: _c,
-      curve: const Interval(0.0, 0.3, curve: Curves.easeOut),
+      curve: const Interval(0.0, 0.2, curve: Curves.easeOut),
     );
     _c.addListener(() {
-      if (!_hit && _c.value >= _kImpact) {
+      if (!_hit && _c.value * _kDur >= _kImpact) {
         _hit = true;
         HapticFeedback.mediumImpact();
       }
     });
     _c.forward().then((_) async {
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await Future<void>.delayed(const Duration(milliseconds: _kHoldMs));
       _proceed();
     });
   }
@@ -81,7 +87,8 @@ class _SplashPageState extends State<SplashPage>
   }
 
   Future<void> _proceed() async {
-    if (!mounted) return;
+    if (!mounted || _navigating) return;
+    _navigating = true;
     final prefs = await SharedPreferences.getInstance();
     final hasSeenOnboarding = prefs.getBool('seen_onboarding_v2') ?? false;
 
@@ -105,47 +112,47 @@ class _SplashPageState extends State<SplashPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _kBg,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Static manga screentone, cached; only its opacity animates.
-          FadeTransition(
-            opacity: _halftoneFade,
-            child: const RepaintBoundary(
-              child: CustomPaint(painter: _HalftoneBgPainter()),
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _proceed, // tap anywhere to skip
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            FadeTransition(
+              opacity: _halftoneFade,
+              child: const RepaintBoundary(
+                child: CustomPaint(painter: _HalftoneBgPainter()),
+              ),
             ),
-          ),
-
-          // Vignette
-          const Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment(0, -0.1),
-                    radius: 0.95,
-                    colors: [Color(0x00000000), Color(0xCC07080C)],
-                    stops: [0.45, 1.0],
+            const Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment(0, -0.1),
+                      radius: 0.95,
+                      colors: [Color(0x00000000), Color(0xCC07080C)],
+                      stops: [0.45, 1.0],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-
-          AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) => LayoutBuilder(
-              builder: (context, box) =>
-                  _buildScene(box.maxWidth, box.maxHeight),
+            AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) => LayoutBuilder(
+                builder: (context, box) =>
+                    _buildScene(box.maxWidth, box.maxHeight),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildScene(double w, double h) {
-    final t = _c.value;
+    final s = _c.value * _kDur;
 
     final cx = w / 2;
     final cy = h * 0.47;
@@ -154,39 +161,43 @@ class _SplashPageState extends State<SplashPage>
     final bookH = halfW * 1.3;
     final center = Offset(cx, cy);
 
-    // Impact shake
-    final since = t - _kImpact;
-    final shakeAmp = since > 0 ? math.exp(-since * 26) * 5 : 0.0;
+    // Impact shake (smooth exponential decay)
+    final since = s - _kImpact;
+    final shakeAmp = since > 0 ? math.exp(-since * 9) * 5.5 : 0.0;
     final shake = Offset(
-      math.sin(t * 190) * shakeAmp,
-      math.cos(t * 163) * shakeAmp * 0.8,
+      math.sin(s * 60) * shakeAmp,
+      math.cos(s * 51) * shakeAmp * 0.8,
     );
 
     // Flash
     double flash = 0;
-    if (t >= _kImpact - 0.02 && t < _kImpact) {
-      flash = (t - (_kImpact - 0.02)) / 0.02;
-    } else if (t >= _kImpact) {
-      flash = 1 - _seg(t, _kImpact, _kImpact + 0.12);
+    if (s >= _kImpact - 0.04 && s < _kImpact) {
+      flash = (s - (_kImpact - 0.04)) / 0.04;
+    } else if (s >= _kImpact) {
+      flash = 1 - _seg(s, _kImpact, _kImpact + 0.3, Curves.easeOut);
     }
 
-    // Logo erupting from the book
-    final logoTravel = _seg(t, 0.60, 0.80, Curves.easeOutCubic);
-    final logoPop = _seg(t, 0.60, 0.80, Curves.easeOutBack);
-    final logoOpacity = _seg(t, 0.60, 0.66);
+    // Logo
+    final logoTravel = _seg(s, _kImpact, _kImpact + 0.5, Curves.easeOutCubic);
+    final logoPop = _seg(s, _kImpact, _kImpact + 0.5, Curves.easeOutBack);
+    final logoOpacity = _seg(s, _kImpact, _kImpact + 0.12);
     final logoFinalY = cy - bookH / 2 - 56;
+    final holdFloat = _seg(s, _kImpact + 0.5, _kImpact + 0.9);
     final logoY = (cy - 10) +
         (logoFinalY - (cy - 10)) * logoTravel +
-        math.sin(t * math.pi * 5) * 3 * _seg(t, 0.8, 0.9);
+        math.sin(s * 2.4) * 3.5 * holdFloat;
+    final breathe = 1 + 0.018 * math.sin(s * 3.2) * holdFloat;
 
-    // Glow
-    final glow = _seg(t, 0.12, 0.70, Curves.easeInOut);
-    final glowBoost = 1 + 0.5 * (since > 0 ? math.exp(-since * 14) : 0);
+    // Glow (grows, spikes on impact, then keeps pulsing softly)
+    final glow = _seg(s, 0.2, 1.2, Curves.easeInOut);
+    final glowBoost = 1 +
+        0.5 * (since > 0 ? math.exp(-since * 6) : 0) +
+        0.10 * math.sin(s * 3.0) * _seg(s, _kImpact + 0.5, _kImpact + 1.0);
 
     // SFX
-    final rumble = _seg(t, 0.08, 0.16) * (1 - _seg(t, 0.46, 0.56));
-    final stamp = _seg(t, _kImpact + 0.01, _kImpact + 0.09, Curves.easeOutBack);
-    final stampOpacity = _seg(t, _kImpact + 0.01, _kImpact + 0.04);
+    final rumble = _seg(s, 0.10, 0.30) * (1 - _seg(s, 0.85, 1.10));
+    final stamp = _seg(s, _kImpact + 0.02, _kImpact + 0.28, Curves.easeOutBack);
+    final stampOpacity = _seg(s, _kImpact + 0.02, _kImpact + 0.12);
 
     return Transform.translate(
       offset: shake,
@@ -221,11 +232,11 @@ class _SplashPageState extends State<SplashPage>
               ),
             ),
 
-            // Speed lines (ambient + impact burst)
+            // Speed lines
             Positioned.fill(
               child: IgnorePointer(
                 child: CustomPaint(
-                  painter: _SpeedLinesPainter(center: center, t: t),
+                  painter: _SpeedLinesPainter(center: center, s: s),
                 ),
               ),
             ),
@@ -235,25 +246,25 @@ class _SplashPageState extends State<SplashPage>
               child: IgnorePointer(
                 child: CustomPaint(
                   painter:
-                      _PanelFramePainter(_seg(t, 0.0, 0.30, Curves.easeOut)),
+                      _PanelFramePainter(_seg(s, 0.0, 0.9, Curves.easeOut)),
                 ),
               ),
             ),
 
-            // ゴゴゴ rumble SFX while the book opens
+            // RUMBLE SFX while the book opens
             if (rumble > 0.01)
               Positioned(
-                left: 24 + math.sin(t * 120) * 1.6,
-                top: cy - bookH / 2 - 26 + math.cos(t * 97) * 1.6,
+                left: 24 + math.sin(s * 40) * 1.6,
+                top: cy - bookH / 2 - 26 + math.cos(s * 33) * 1.6,
                 child: IgnorePointer(
                   child: Opacity(
                     opacity: rumble,
                     child: Transform.rotate(
-                      angle: -0.16,
+                      angle: -0.14,
                       child: _Sfx(
-                        'ゴゴゴ',
-                        26,
-                        Colors.white.withValues(alpha: 0.9),
+                        'RUMBLE',
+                        20,
+                        Colors.white.withValues(alpha: 0.92),
                         _kMint.withValues(alpha: 0.7),
                       ),
                     ),
@@ -266,7 +277,7 @@ class _SplashPageState extends State<SplashPage>
               child: IgnorePointer(
                 child: CustomPaint(
                   painter: _BookPainter(
-                    t: t,
+                    s: s,
                     center: center,
                     halfW: halfW,
                     h: bookH,
@@ -275,11 +286,15 @@ class _SplashPageState extends State<SplashPage>
               ),
             ),
 
-            // Paper bits + sparkles
+            // Paper bits, sparkles, twinkles
             Positioned.fill(
               child: IgnorePointer(
                 child: CustomPaint(
-                  painter: _SparkPainter(origin: Offset(cx, cy - 8), t: t),
+                  painter: _SparkPainter(
+                    origin: Offset(cx, cy - 8),
+                    twinkleCenter: Offset(cx, logoFinalY),
+                    s: s,
+                  ),
                 ),
               ),
             ),
@@ -295,7 +310,7 @@ class _SplashPageState extends State<SplashPage>
                   child: Opacity(
                     opacity: logoOpacity,
                     child: Transform.scale(
-                      scale: logoPop.clamp(0.0, 1.25),
+                      scale: (logoPop * breathe).clamp(0.0, 1.3),
                       child: const Center(
                         child: BrandLogo(size: 84, withGlow: true),
                       ),
@@ -304,21 +319,21 @@ class _SplashPageState extends State<SplashPage>
                 ),
               ),
 
-            // ドン!! impact stamp
+            // BOOM!! impact stamp
             if (stampOpacity > 0)
               Positioned(
-                right: 18,
-                top: cy - bookH / 2 - 44,
+                right: 20,
+                top: cy - bookH / 2 - 36,
                 child: IgnorePointer(
                   child: Opacity(
-                    opacity: stampOpacity,
+                    opacity: stampOpacity * (1 - 0.35 * _seg(s, 2.2, 3.0)),
                     child: Transform.rotate(
                       angle: 0.2,
                       child: Transform.scale(
                         scale: 0.6 + 0.4 * stamp + (1 - stamp) * 1.2,
-                        child: _Sfx(
-                          'ドン!!',
-                          36,
+                        child: const _Sfx(
+                          'BOOM!!',
+                          30,
                           Colors.white,
                           _kMint,
                         ),
@@ -333,7 +348,7 @@ class _SplashPageState extends State<SplashPage>
               left: 0,
               right: 0,
               top: cy + bookH / 2 + 34,
-              child: IgnorePointer(child: _buildTitle(t, w)),
+              child: IgnorePointer(child: _buildTitle(s, w)),
             ),
 
             // Bottom chapter loader
@@ -341,7 +356,7 @@ class _SplashPageState extends State<SplashPage>
               bottom: 44,
               left: 0,
               right: 0,
-              child: IgnorePointer(child: _buildLoader(t)),
+              child: IgnorePointer(child: _buildLoader(s)),
             ),
 
             // Impact flash
@@ -360,21 +375,22 @@ class _SplashPageState extends State<SplashPage>
     );
   }
 
-  Widget _buildTitle(double t, double w) {
+  Widget _buildTitle(double s, double w) {
     const title = 'MANGA READER';
-    final tagOpacity = _seg(t, 0.72, 0.82);
-    final slash = _seg(t, 0.84, 0.95, Curves.easeOutCubic);
-    final sub = _seg(t, 0.88, 1.0);
+    final tagOpacity = _seg(s, _kImpact + 0.25, _kImpact + 0.50);
+    final slash =
+        _seg(s, _kImpact + 0.75, _kImpact + 1.05, Curves.easeOutCubic);
+    final sub = _seg(s, _kImpact + 0.85, _kImpact + 1.25, Curves.easeOut);
 
     final letters = <Widget>[];
     for (var i = 0; i < title.length; i++) {
-      final s = _seg(
-          t, 0.74 + i * 0.011, 0.74 + i * 0.011 + 0.1, Curves.easeOutCubic);
+      final start = _kImpact + 0.30 + i * 0.025;
+      final p = _seg(s, start, start + 0.30, Curves.easeOutCubic);
       letters.add(
         Opacity(
-          opacity: s,
+          opacity: p,
           child: Transform.translate(
-            offset: Offset(0, (1 - s) * 16),
+            offset: Offset(0, (1 - p) * 16),
             child: Text(
               title[i],
               style: const TextStyle(
@@ -395,12 +411,12 @@ class _SplashPageState extends State<SplashPage>
         Opacity(
           opacity: tagOpacity,
           child: Text(
-            '漫画',
+            'YOUR STORY BEGINS',
             style: TextStyle(
               color: _kMint.withValues(alpha: 0.85),
-              fontSize: 12,
+              fontSize: 10.5,
               fontWeight: FontWeight.w800,
-              letterSpacing: 8,
+              letterSpacing: 5,
             ),
           ),
         ),
@@ -447,8 +463,9 @@ class _SplashPageState extends State<SplashPage>
     );
   }
 
-  Widget _buildLoader(double t) {
-    final o = _seg(t, 0.55, 0.7);
+  Widget _buildLoader(double s) {
+    final o = _seg(s, 0.4, 0.9);
+    final progress = (s / _kDur).clamp(0.0, 1.0);
     return Opacity(
       opacity: o,
       child: Column(
@@ -473,7 +490,7 @@ class _SplashPageState extends State<SplashPage>
             ),
             alignment: Alignment.centerLeft,
             child: FractionallySizedBox(
-              widthFactor: t.clamp(0.0, 1.0),
+              widthFactor: progress,
               child: Container(
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(colors: [_kCyan, _kMint]),
@@ -495,7 +512,7 @@ class _SplashPageState extends State<SplashPage>
 }
 
 // ===========================================================================
-// SFX TEXT (outlined manga sound effect)
+// SFX TEXT (outlined comic sound effect)
 // ===========================================================================
 class _Sfx extends StatelessWidget {
   const _Sfx(this.text, this.size, this.fill, this.outline);
@@ -514,6 +531,8 @@ class _Sfx extends StatelessWidget {
           style: TextStyle(
             fontSize: size,
             fontWeight: FontWeight.w900,
+            fontStyle: FontStyle.italic,
+            letterSpacing: 1,
             foreground: Paint()
               ..style = PaintingStyle.stroke
               ..strokeWidth = size * 0.18
@@ -526,6 +545,8 @@ class _Sfx extends StatelessWidget {
           style: TextStyle(
             fontSize: size,
             fontWeight: FontWeight.w900,
+            fontStyle: FontStyle.italic,
+            letterSpacing: 1,
             color: fill,
           ),
         ),
@@ -555,12 +576,12 @@ class _HalftoneBgPainter extends CustomPainter {
         final dx = px - cx;
         final dy = y - cy;
         final d = (math.sqrt(dx * dx + dy * dy) / maxD).clamp(0.0, 1.0);
-        final s = ((d - 0.3) / 0.7).clamp(0.0, 1.0);
-        final r = 0.4 + 2.6 * s * s;
-        if (s <= 0.0) continue;
+        final sc = ((d - 0.3) / 0.7).clamp(0.0, 1.0);
+        if (sc <= 0.0) continue;
+        final r = 0.4 + 2.6 * sc * sc;
         final mintMix = (y / size.height).clamp(0.0, 1.0);
         p.color = Color.lerp(Colors.white, _kMint, mintMix * 0.7)!
-            .withValues(alpha: 0.05 + 0.06 * s);
+            .withValues(alpha: 0.05 + 0.06 * sc);
         canvas.drawCircle(Offset(px, y), r, p);
       }
     }
@@ -601,7 +622,6 @@ class _PanelFramePainter extends CustomPainter {
     canvas.drawLine(r.bottomRight, lerp(r.bottomRight, r.bottomLeft, e2), line);
     canvas.drawLine(r.bottomLeft, lerp(r.bottomLeft, r.topLeft, e3), line);
 
-    // Bold mint corner brackets
     final br = Paint()
       ..color = _kMint.withValues(alpha: 0.85 * p)
       ..style = PaintingStyle.stroke
@@ -630,10 +650,10 @@ class _Ray {
 }
 
 class _SpeedLinesPainter extends CustomPainter {
-  _SpeedLinesPainter({required this.center, required this.t});
+  _SpeedLinesPainter({required this.center, required this.s});
 
   final Offset center;
-  final double t;
+  final double s;
 
   static final List<_Ray> _rays = () {
     final r = math.Random(11);
@@ -663,9 +683,9 @@ class _SpeedLinesPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final big = size.longestSide;
-    final ambient = _seg(t, 0.12, 0.5);
-    final burstP = _seg(t, _kImpact, 0.95, Curves.easeOutCubic);
-    final burstOn = t >= _kImpact;
+    final ambient = _seg(s, 0.3, 1.3, Curves.easeOut);
+    final burstP = _seg(s, _kImpact, _kImpact + 1.2, Curves.easeOutCubic);
+    final burstOn = s >= _kImpact;
     final paint = Paint()
       ..style = PaintingStyle.fill
       ..isAntiAlias = true;
@@ -674,9 +694,8 @@ class _SpeedLinesPainter extends CustomPainter {
       final ray = _rays[i];
       final isMint = i % 4 == 0;
 
-      // Faint always-on focus lines (flicker like hand-drawn frames)
       if (ambient > 0.01) {
-        final flicker = 0.65 + 0.35 * math.sin(t * 22 + ray.inner * 9);
+        final flicker = 0.65 + 0.35 * math.sin(s * 7 + ray.inner * 9);
         final a = 0.05 * ambient * flicker;
         final r0 = big * (0.34 + 0.18 * ray.inner);
         final r1 = r0 + big * (0.18 + 0.3 * ray.len);
@@ -685,7 +704,6 @@ class _SpeedLinesPainter extends CustomPainter {
             _ray(ray.angle, r0, r1, 0.006 + 0.014 * ray.width), paint);
       }
 
-      // Impact burst
       if (burstOn && burstP < 0.999) {
         final a = 0.6 * math.pow(1 - burstP, 1.6);
         final r0 = big * (0.10 + 0.22 * ray.inner) + burstP * big * 0.5;
@@ -698,11 +716,11 @@ class _SpeedLinesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SpeedLinesPainter old) => old.t != t;
+  bool shouldRepaint(covariant _SpeedLinesPainter old) => old.s != s;
 }
 
 // ===========================================================================
-// SPARKS / PAPER BITS erupting from the book
+// SPARKS / PAPER BITS + gentle twinkles around the logo during the hold
 // ===========================================================================
 class _Spark {
   const _Spark(this.dx, this.speed, this.delay, this.size, this.rot, this.kind);
@@ -715,10 +733,15 @@ class _Spark {
 }
 
 class _SparkPainter extends CustomPainter {
-  _SparkPainter({required this.origin, required this.t});
+  _SparkPainter({
+    required this.origin,
+    required this.twinkleCenter,
+    required this.s,
+  });
 
   final Offset origin;
-  final double t;
+  final Offset twinkleCenter;
+  final double s;
 
   static final List<_Spark> _ps = () {
     final r = math.Random(5);
@@ -735,65 +758,90 @@ class _SparkPainter extends CustomPainter {
     );
   }();
 
+  void _star(Canvas canvas, Offset c, double size, Paint paint) {
+    final path = Path()
+      ..moveTo(c.dx, c.dy - size)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx + size, c.dy)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy + size)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx - size, c.dy)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy - size)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    final lt = (t - _kImpact) / (1 - _kImpact);
-    if (lt <= 0) return;
     final paint = Paint()..isAntiAlias = true;
 
-    for (final p in _ps) {
-      final q = ((lt - p.delay * 0.4) / 0.6).clamp(0.0, 1.0);
-      if (q <= 0 || q >= 1) continue;
-      final ease = q * (2 - q);
-      final pos = origin +
-          Offset(
-            p.dx * 110 * ease + math.sin(q * 6 + p.rot) * 12,
-            -p.speed * 280 * ease + 40 * q * q,
+    // Eruption: paper scraps + sparkles
+    final lt = (s - _kImpact) / 1.25;
+    if (lt > 0) {
+      for (final p in _ps) {
+        final q = ((lt - p.delay * 0.4) / 0.6).clamp(0.0, 1.0);
+        if (q <= 0 || q >= 1) continue;
+        final ease = q * (2 - q);
+        final pos = origin +
+            Offset(
+              p.dx * 110 * ease + math.sin(q * 6 + p.rot) * 12,
+              -p.speed * 280 * ease + 40 * q * q,
+            );
+        final alpha = (1 - q);
+        canvas.save();
+        canvas.translate(pos.dx, pos.dy);
+        canvas.rotate(p.rot + q * 5 * (p.dx.sign == 0 ? 1 : p.dx.sign));
+        if (p.kind == 0) {
+          paint
+            ..style = PaintingStyle.fill
+            ..color = _kPaper.withValues(alpha: 0.9 * alpha);
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                  center: Offset.zero, width: 6 * p.size, height: 9 * p.size),
+              const Radius.circular(1.2),
+            ),
+            paint,
           );
-      final alpha = (1 - q);
-      canvas.save();
-      canvas.translate(pos.dx, pos.dy);
-      canvas.rotate(p.rot + q * 5 * (p.dx.sign == 0 ? 1 : p.dx.sign));
-      if (p.kind == 0) {
-        // little manga page scrap
-        paint.color = _kPaper.withValues(alpha: 0.9 * alpha);
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
+          paint
+            ..color = _kInk.withValues(alpha: 0.6 * alpha)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.8;
+          canvas.drawRect(
             Rect.fromCenter(
-                center: Offset.zero, width: 6 * p.size, height: 9 * p.size),
-            const Radius.circular(1.2),
-          ),
-          paint,
-        );
-        paint
-          ..color = _kInk.withValues(alpha: 0.6 * alpha)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 0.8;
-        canvas.drawRect(
-          Rect.fromCenter(
-              center: Offset.zero, width: 3.6 * p.size, height: 4.6 * p.size),
-          paint,
-        );
-        paint.style = PaintingStyle.fill;
-      } else {
-        // mint sparkle (4-point star)
-        paint.color = _kMint.withValues(alpha: 0.95 * alpha);
-        final s = 4.5 * p.size;
-        final path = Path()
-          ..moveTo(0, -s)
-          ..quadraticBezierTo(0, 0, s, 0)
-          ..quadraticBezierTo(0, 0, 0, s)
-          ..quadraticBezierTo(0, 0, -s, 0)
-          ..quadraticBezierTo(0, 0, 0, -s)
-          ..close();
-        canvas.drawPath(path, paint);
+                center: Offset.zero, width: 3.6 * p.size, height: 4.6 * p.size),
+            paint,
+          );
+          paint.style = PaintingStyle.fill;
+        } else {
+          paint
+            ..style = PaintingStyle.fill
+            ..color = _kMint.withValues(alpha: 0.95 * alpha);
+          _star(canvas, Offset.zero, 4.5 * p.size, paint);
+        }
+        canvas.restore();
       }
-      canvas.restore();
+    }
+
+    // Hero-hold twinkles orbiting the logo
+    final tw = _seg(s, _kImpact + 0.6, _kImpact + 1.1);
+    if (tw > 0) {
+      paint.style = PaintingStyle.fill;
+      for (var i = 0; i < 9; i++) {
+        final ang = i / 9 * math.pi * 2 + 0.4;
+        final rad = 62.0 + 30.0 * ((i * 37) % 10) / 10;
+        final phase = i * 1.7;
+        final v = math.sin(s * 3.2 + phase);
+        final a = math.pow(math.max(0.0, v), 3).toDouble() * tw;
+        if (a < 0.02) continue;
+        final c = twinkleCenter +
+            Offset(math.cos(ang) * rad * 1.15, math.sin(ang) * rad * 0.85);
+        paint.color = (i.isEven ? _kMint : Colors.white).withValues(alpha: a);
+        _star(canvas, c, 3 + 4 * a, paint);
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _SparkPainter old) => old.t != t;
+  bool shouldRepaint(covariant _SparkPainter old) => old.s != s;
 }
 
 // ===========================================================================
@@ -828,7 +876,8 @@ class _BrushSlashPainter extends CustomPainter {
 }
 
 // ===========================================================================
-// THE BOOK: real 3D-hinged cover + page flips, manga panels on every page
+// THE BOOK: real 3D-hinged cover + evenly staggered page riffle,
+// manga panels on every page
 // ===========================================================================
 const _kLayouts = <List<List<double>>>[
   // l, t, w, h (fractions of the page's inner area)
@@ -854,35 +903,41 @@ const _kLayouts = <List<List<double>>>[
 
 class _BookPainter extends CustomPainter {
   _BookPainter({
-    required this.t,
+    required this.s,
     required this.center,
     required this.halfW,
     required this.h,
   });
 
-  final double t;
+  final double s;
   final Offset center;
   final double halfW;
   final double h;
 
-  // index 0 = cover, 1..3 = manga pages
-  static const _starts = [0.10, 0.36, 0.42, 0.48];
-  static const _ends = [0.42, 0.52, 0.58, 0.64];
+  // index 0 = cover, 1..3 = manga pages (seconds). Pages are evenly
+  // staggered (0.11s apart, equal duration) so the riffle has one rhythm,
+  // and the last page lands right before the impact.
+  static const _starts = [0.12, 0.55, 0.66, 0.77];
+  static const _ends = [0.62, 0.93, 1.04, 1.15];
 
   @override
   void paint(Canvas canvas, Size size) {
-    final op = _seg(t, 0.02, 0.12);
+    final op = _seg(s, 0.0, 0.25);
     if (op <= 0) return;
-    final appear = _seg(t, 0.02, 0.20, Curves.easeOutBack);
-    final openP = _seg(t, 0.10, 0.42, Curves.easeInOutCubic);
+    final appear = _seg(s, 0.0, 0.40, Curves.easeOutBack);
+    final openP = _seg(s, 0.12, 0.62, Curves.easeInOutCubic);
     final dx = -halfW / 2 * (1 - openP);
-    final bob = math.sin(t * math.pi * 3) * 3;
-    final since = t - _kImpact;
-    final kick = since > 0 ? math.exp(-since * 28) * 0.05 : 0.0;
+    final bob = math.sin(s * 2.8) * 3;
+    final since = s - _kImpact;
+    final kick = since > 0 ? math.exp(-since * 9) * 0.05 : 0.0;
+    // gentle camera push-in during the build-up, relaxing after the hit
+    final push = 0.05 *
+        _seg(s, 0.3, _kImpact, Curves.easeIn) *
+        (1 - _seg(s, _kImpact, _kImpact + 0.5, Curves.easeOut));
 
     canvas.save();
     canvas.translate(center.dx + dx, center.dy + bob);
-    canvas.scale(0.7 + 0.3 * appear + kick);
+    canvas.scale(0.7 + 0.3 * appear + kick + push);
 
     final bounds =
         Rect.fromCenter(center: Offset.zero, width: halfW * 6, height: h * 3);
@@ -934,7 +989,7 @@ class _BookPainter extends CustomPainter {
         ..color = _kMint.withValues(alpha: 0.45),
     );
 
-    // Page block edge + the page that gets revealed on the right
+    // Page block edge + the page revealed on the right
     final pageRect = Rect.fromLTWH(0, -h / 2 + 5, halfW - 5, h - 10);
     for (var i = 3; i >= 1; i--) {
       canvas.drawRect(
@@ -947,7 +1002,13 @@ class _BookPainter extends CustomPainter {
     // Leaves, ordered for correct overlap
     final a = [
       for (var i = 0; i < 4; i++)
-        math.pi * _seg(t, _starts[i], _ends[i], Curves.easeInOutCubic),
+        math.pi *
+            _seg(
+              s,
+              _starts[i],
+              _ends[i],
+              i == 0 ? Curves.easeInOutCubic : Curves.easeInOutSine,
+            ),
     ];
     final rightSide = [
       for (var i = 0; i < 4; i++)
@@ -976,8 +1037,10 @@ class _BookPainter extends CustomPainter {
       );
     }
 
-    // Light beam rising out of the pages at impact
-    final beam = _seg(t, 0.56, 0.66) * (1 - 0.55 * _seg(t, 0.8, 1.0));
+    // Light beam rising out of the pages at impact; stays softly alive
+    final beam = _seg(s, _kImpact - 0.2, _kImpact + 0.1, Curves.easeOut) *
+        (1 - 0.55 * _seg(s, _kImpact + 1.2, _kImpact + 2.0)) *
+        (0.92 + 0.08 * math.sin(s * 3.0));
     if (beam > 0.01) {
       final path = Path()
         ..moveTo(-halfW * 0.30, 0)
@@ -1020,8 +1083,8 @@ class _BookPainter extends CustomPainter {
 
     final back = a > math.pi / 2;
     if (back) {
-      // Draw the reverse side un-mirrored.
-      canvas.translate(halfW, 0);
+      // draw the reverse side un-mirrored
+      canvas.translate(rect.right, 0);
       canvas.scale(-1.0, 1.0);
     }
     canvas.clipRRect(rrect, doAntiAlias: true);
@@ -1060,7 +1123,6 @@ class _BookPainter extends CustomPainter {
         ).createShader(r),
     );
 
-    // Diagonal mint slash band
     final y1 = r.top + r.height * 0.64;
     final y2 = r.top + r.height * 0.38;
     canvas.drawPath(
@@ -1082,7 +1144,6 @@ class _BookPainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: 0.75),
     );
 
-    // Inner border
     canvas.drawRect(
       r.deflate(9),
       Paint()
@@ -1113,20 +1174,21 @@ class _BookPainter extends CustomPainter {
         letterSpacing: 4,
       ),
     );
-    final fs = halfW * 0.22;
-    _text(
-      canvas,
-      '漫\n画',
-      Offset(r.right - 20 - fs, r.bottom - 18 - fs * 2.2),
-      TextStyle(
-        color: Colors.white.withValues(alpha: 0.9),
-        fontSize: fs,
-        fontWeight: FontWeight.w900,
-        height: 1.05,
-      ),
-    );
 
-    // Spine hinge highlight
+    final vol = TextPainter(
+      text: TextSpan(
+        text: 'VOL. 01',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.85),
+          fontSize: halfW * 0.085,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 3,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    vol.paint(canvas, Offset(r.right - 22 - vol.width, r.bottom - 28));
+
     final hinge = Rect.fromLTWH(r.left, r.top, 14, r.height);
     canvas.drawRect(
       hinge,
@@ -1151,10 +1213,10 @@ class _BookPainter extends CustomPainter {
     );
     final tp = TextPainter(
       text: TextSpan(
-        text: '漫画  READER',
+        text: 'MANGA READER',
         style: TextStyle(
           color: _kMint.withValues(alpha: 0.6),
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: FontWeight.w700,
           letterSpacing: 3,
         ),
@@ -1196,7 +1258,6 @@ class _BookPainter extends CustomPainter {
       _panel(canvas, pr, (seed + layoutIdx * 3 + i) % 4);
     }
 
-    // Gutter shading near the spine
     const g = 26.0;
     final gr = spineLeft
         ? Rect.fromLTWH(rect.left, rect.top, g, rect.height)
@@ -1295,9 +1356,9 @@ class _BookPainter extends CustomPainter {
     );
   }
 
-  void _text(Canvas canvas, String s, Offset o, TextStyle st) {
+  void _text(Canvas canvas, String str, Offset o, TextStyle st) {
     final tp = TextPainter(
-      text: TextSpan(text: s, style: st),
+      text: TextSpan(text: str, style: st),
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, o);
@@ -1305,5 +1366,5 @@ class _BookPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _BookPainter old) =>
-      old.t != t || old.halfW != halfW || old.h != h || old.center != center;
+      old.s != s || old.halfW != halfW || old.h != h || old.center != center;
 }
