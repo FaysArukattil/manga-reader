@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../mangadex_service.dart';
 import '../page_cache.dart';
 import '../scrape/scrape_service.dart';
@@ -6,6 +8,7 @@ import '../scrape/site_adapter.dart';
 class ReaderPageItem {
   const ReaderPageItem({
     required this.url,
+    this.urls = const [],
     required this.chapterId,
     required this.chapterLabel,
     required this.pageIndex,
@@ -14,13 +17,85 @@ class ReaderPageItem {
   });
 
   final String url;
+  final List<String> urls;
   final String chapterId;
   final String chapterLabel;
   final int pageIndex;
   final int totalInChapter;
   final String? referer;
 
+  List<String> get allUrls => urls.isNotEmpty ? urls : [url];
   String get pageKey => PageCache.keyFor(url);
+
+  bool matchesKey(String key) =>
+      pageKey == key || allUrls.any((u) => PageCache.keyFor(u) == key);
+
+  /// Builds grouped reader page items.
+  /// When webtoons / manhwa chapters are uploaded sliced into dozens or hundreds
+  /// of small vertical pieces (e.g. 111 slices of 1250px), displaying each slice
+  /// as a single book page splits speech bubbles and dialogues in half.
+  /// Grouping consecutive slices targets the standard ~25-30 pages per chapter
+  /// and renders them stacked seamlessly without seams or gaps.
+  static List<ReaderPageItem> buildGroupedItems({
+    required List<String> rawPages,
+    required String chapterId,
+    required String chapterLabel,
+    String? referer,
+  }) {
+    if (rawPages.isEmpty) return const [];
+    final count = rawPages.length;
+
+    int groupSize = 1;
+    if (count >= 36) {
+      groupSize = (count / 28).round().clamp(1, 6);
+    }
+
+    if (groupSize <= 1) {
+      return List.generate(
+        count,
+        (i) => ReaderPageItem(
+          url: rawPages[i],
+          urls: [rawPages[i]],
+          chapterId: chapterId,
+          chapterLabel: chapterLabel,
+          pageIndex: i,
+          totalInChapter: count,
+          referer: referer,
+        ),
+      );
+    }
+
+    final List<ReaderPageItem> items = [];
+    int pageIdx = 0;
+    for (int i = 0; i < count; i += groupSize) {
+      final chunk = rawPages.sublist(i, math.min(i + groupSize, count));
+      items.add(
+        ReaderPageItem(
+          url: chunk.first,
+          urls: chunk,
+          chapterId: chapterId,
+          chapterLabel: chapterLabel,
+          pageIndex: pageIdx,
+          totalInChapter: 0,
+          referer: referer,
+        ),
+      );
+      pageIdx++;
+    }
+
+    final total = items.length;
+    return items
+        .map((item) => ReaderPageItem(
+              url: item.url,
+              urls: item.urls,
+              chapterId: item.chapterId,
+              chapterLabel: item.chapterLabel,
+              pageIndex: item.pageIndex,
+              totalInChapter: total,
+              referer: item.referer,
+            ))
+        .toList();
+  }
 }
 
 abstract class ChapterSource {
@@ -107,18 +182,11 @@ class ScrapedSource implements ChapterSource, RefreshableChapterSource {
     }
 
     final label = result.chapterLabel ?? '';
-    final count = result.pages.length;
-
-    return List.generate(
-      count,
-      (i) => ReaderPageItem(
-        url: result.pages[i],
-        chapterId: chapterIdOrUrl,
-        chapterLabel: label,
-        pageIndex: i,
-        totalInChapter: count,
-        referer: chapterIdOrUrl,
-      ),
+    return ReaderPageItem.buildGroupedItems(
+      rawPages: result.pages,
+      chapterId: chapterIdOrUrl,
+      chapterLabel: label,
+      referer: chapterIdOrUrl,
     );
   }
 

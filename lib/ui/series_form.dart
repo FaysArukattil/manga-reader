@@ -30,7 +30,7 @@ class SeriesFormResult {
 }
 
 /// Bottom sheet used both to add (optionally pre-filled from a share) and to
-/// edit a series. Streamlined for rapid, frictionless link adding.
+/// edit a series.
 class SeriesForm extends StatefulWidget {
   const SeriesForm({
     super.key,
@@ -47,7 +47,8 @@ class SeriesForm extends StatefulWidget {
   State<SeriesForm> createState() => _SeriesFormState();
 }
 
-class _SeriesFormState extends State<SeriesForm> {
+class _SeriesFormState extends State<SeriesForm>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _url;
   late final TextEditingController _title;
@@ -57,7 +58,9 @@ class _SeriesFormState extends State<SeriesForm> {
 
   Uint8List? _customCoverBytes;
   bool _showCoverUrlField = false;
-  late bool _showAdvanced;
+
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
 
   bool get _editing => widget.existing != null;
 
@@ -70,11 +73,21 @@ class _SeriesFormState extends State<SeriesForm> {
     _chapter = TextEditingController(text: e?.chapter ?? '');
     _coverUrlController = TextEditingController(text: e?.coverUrl ?? '');
     _status = e?.status ?? ReadStatus.reading;
-    _showAdvanced = _editing || (e?.coverUrl?.isNotEmpty ?? false);
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = CurvedAnimation(
+      parent: _pulseController,
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
   void dispose() {
+    _pulseController.dispose();
     _url.dispose();
     _title.dispose();
     _chapter.dispose();
@@ -189,14 +202,29 @@ class _SeriesFormState extends State<SeriesForm> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _editing ? 'Edit Manga' : 'Add Manga',
-                        style: TextStyle(
-                          color: t.textPrimary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _editing ? 'Edit Manga' : 'Add to Shelf',
+                            style: TextStyle(
+                              color: t.textPrimary,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.4,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _editing
+                                ? 'Update details, chapter or cover art'
+                                : 'Paste any chapter URL to start reading',
+                            style: TextStyle(
+                              color: t.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
                       ),
                       IconButton(
                         visualDensity: VisualDensity.compact,
@@ -205,17 +233,126 @@ class _SeriesFormState extends State<SeriesForm> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 18),
 
-                  // 1. Chapter / Series Link Field with inline Paste button
-                  Text(
-                    'CHAPTER OR SERIES LINK',
-                    style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.8,
+                  // Initial animated guidance banner
+                  if (!_editing) ...[
+                    AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, _) {
+                        final glow = _pulseAnimation.value;
+                        return Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: t.surfaceCard,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: t.accent.withValues(alpha: 0.35 + 0.35 * glow),
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: t.accent.withValues(alpha: 0.08 + 0.08 * glow),
+                                blurRadius: 14,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: t.accent.withValues(alpha: 0.16),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.auto_stories_rounded,
+                                  size: 18,
+                                  color: t.accent,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Instant Universal Reader',
+                                      style: TextStyle(
+                                        color: t.textPrimary,
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'Copy the link of your current chapter from any site (Asura, MangaDex, etc.). Shelfmark auto-strips ads, syncs your page, and detects next chapters!',
+                                      style: TextStyle(
+                                        color: t.textSecondary,
+                                        fontSize: 12,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Chapter / Series Link Field with Paste button
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'CHAPTER OR SERIES LINK',
+                        style: TextStyle(
+                          color: t.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _pasteFromClipboard,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.accent.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.content_paste_rounded,
+                                size: 13,
+                                color: t.accent,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Paste Clipboard',
+                                style: TextStyle(
+                                  color: t.accent,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
@@ -224,31 +361,11 @@ class _SeriesFormState extends State<SeriesForm> {
                     style: TextStyle(color: t.textPrimary, fontSize: 14.5),
                     cursorColor: t.accent,
                     decoration: InputDecoration(
-                      hintText: 'Paste manga link (e.g. asura, tcb, mangadex)',
-                      hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
+                      hintText: 'https://site.com/series/title/chapter-1',
+                      hintStyle: TextStyle(color: t.textTertiary, fontSize: 13.5),
                       filled: true,
                       fillColor: t.surfaceCard,
                       prefixIcon: Icon(Icons.link_rounded, color: t.accent, size: 20),
-                      suffixIcon: Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: TextButton.icon(
-                          onPressed: _pasteFromClipboard,
-                          icon: Icon(Icons.content_paste_rounded,
-                              size: 14, color: t.accent),
-                          label: Text(
-                            'Paste',
-                            style: TextStyle(
-                              color: t.accent,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                          ),
-                        ),
-                      ),
                       contentPadding:
                           const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       border: OutlineInputBorder(
@@ -266,11 +383,11 @@ class _SeriesFormState extends State<SeriesForm> {
                     ),
                     validator: _validateUrl,
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
-                  // 2. Title Field (Clean & simple)
+                  // Title Field
                   Text(
-                    'TITLE (OPTIONAL)',
+                    'MANGA TITLE (OPTIONAL)',
                     style: TextStyle(
                       color: t.textSecondary,
                       fontSize: 11,
@@ -285,12 +402,12 @@ class _SeriesFormState extends State<SeriesForm> {
                     style: TextStyle(color: t.textPrimary, fontSize: 14.5),
                     cursorColor: t.accent,
                     decoration: InputDecoration(
-                      hintText: 'Auto-detected from webpage if left empty',
-                      hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
+                      hintText: _editing ? 'Title' : 'Auto-detected from webpage if empty',
+                      hintStyle: TextStyle(color: t.textTertiary, fontSize: 13.5),
                       filled: true,
                       fillColor: t.surfaceCard,
-                      prefixIcon: Icon(Icons.title_rounded,
-                          color: t.textSecondary, size: 20),
+                      prefixIcon:
+                          Icon(Icons.title_rounded, color: t.textSecondary, size: 20),
                       contentPadding:
                           const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       border: OutlineInputBorder(
@@ -307,95 +424,12 @@ class _SeriesFormState extends State<SeriesForm> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
-                  // 3. Progressive Disclosure Toggle: "More options (Cover image, status)"
-                  InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      setState(() => _showAdvanced = !_showAdvanced);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 6, horizontal: 2),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _showAdvanced
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            size: 18,
-                            color: t.accent,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _showAdvanced
-                                ? 'Hide additional options'
-                                : 'More options (Custom cover, status)',
-                            style: TextStyle(
-                              color: t.accent,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // 4. Advanced Section (Only shown when expanded or editing)
-                  if (_showAdvanced) ...[
-                    const SizedBox(height: 12),
-
-                    // Chapter field (for editing)
-                    if (_editing) ...[
-                      Text(
-                        'CURRENT CHAPTER',
-                        style: TextStyle(
-                          color: t.textSecondary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _chapter,
-                        style: TextStyle(color: t.textPrimary, fontSize: 14.5),
-                        cursorColor: t.accent,
-                        decoration: InputDecoration(
-                          hintText: 'e.g. Chapter 42',
-                          hintStyle:
-                              TextStyle(color: t.textTertiary, fontSize: 13),
-                          filled: true,
-                          fillColor: t.surfaceCard,
-                          prefixIcon: Icon(Icons.bookmark_outline_rounded,
-                              color: t.textSecondary, size: 20),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 14),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: t.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: t.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide:
-                                BorderSide(color: t.accent, width: 1.5),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
-
-                    // Custom Thumbnail Selector
+                  // Chapter field (for editing)
+                  if (_editing) ...[
                     Text(
-                      'COVER THUMBNAIL',
+                      'CURRENT CHAPTER',
                       style: TextStyle(
                         color: t.textSecondary,
                         fontSize: 11,
@@ -404,206 +438,249 @@ class _SeriesFormState extends State<SeriesForm> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: t.surfaceCard,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: t.border),
+                    TextFormField(
+                      controller: _chapter,
+                      style: TextStyle(color: t.textPrimary, fontSize: 14.5),
+                      cursorColor: t.accent,
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Chapter 42',
+                        hintStyle: TextStyle(color: t.textTertiary, fontSize: 13.5),
+                        filled: true,
+                        fillColor: t.surfaceCard,
+                        prefixIcon: Icon(Icons.bookmark_outline_rounded,
+                            color: t.textSecondary, size: 20),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: t.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: t.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: t.accent, width: 1.5),
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: Container(
-                              width: 48,
-                              height: 64,
-                              color: t.surface,
-                              child: _buildCoverPreview(t),
-                            ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Custom Thumbnail Section
+                  Text(
+                    'COVER THUMBNAIL',
+                    style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: t.surfaceCard,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: t.border),
+                    ),
+                    child: Row(
+                      children: [
+                        // Thumbnail Preview
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            width: 58,
+                            height: 80,
+                            color: t.surface,
+                            child: _buildCoverPreview(t),
                           ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _customCoverBytes != null
-                                      ? 'Custom image uploaded'
-                                      : _coverUrlController.text.isNotEmpty
-                                          ? 'Custom image link set'
-                                          : 'Auto-fetched from website',
-                                  style: TextStyle(
-                                    color: t.textPrimary,
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _customCoverBytes != null
+                                    ? 'Custom image selected'
+                                    : _coverUrlController.text.isNotEmpty
+                                        ? 'Custom cover link set'
+                                        : 'Auto-fetched from website',
+                                style: TextStyle(
+                                  color: t.textPrimary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 6,
-                                  children: [
-                                    PressableScale(
-                                      onTap: _pickImage,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 5),
-                                        decoration: BoxDecoration(
-                                          color: t.surface,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          border: Border.all(color: t.border),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              Icons.photo_library_outlined,
-                                              size: 13,
-                                              color: t.accent,
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  PressableScale(
+                                    onTap: _pickImage,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: t.surface,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: t.border),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.photo_library_outlined,
+                                            size: 14,
+                                            color: t.accent,
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            'Upload',
+                                            style: TextStyle(
+                                              color: t.textPrimary,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
                                             ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              'Upload',
-                                              style: TextStyle(
-                                                color: t.textPrimary,
-                                                fontSize: 11.5,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
                                     ),
+                                  ),
+                                  PressableScale(
+                                    onTap: () {
+                                      setState(() {
+                                        _showCoverUrlField = !_showCoverUrlField;
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: t.surface,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: t.border),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.link_rounded,
+                                            size: 14,
+                                            color: t.textSecondary,
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            'Link URL',
+                                            style: TextStyle(
+                                              color: t.textPrimary,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (_customCoverBytes != null ||
+                                      _coverUrlController.text.isNotEmpty)
                                     PressableScale(
                                       onTap: () {
                                         setState(() {
-                                          _showCoverUrlField =
-                                              !_showCoverUrlField;
+                                          _customCoverBytes = null;
+                                          _coverUrlController.clear();
+                                          _showCoverUrlField = false;
                                         });
                                       },
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 5),
-                                        decoration: BoxDecoration(
-                                          color: t.surface,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          border: Border.all(color: t.border),
+                                          horizontal: 8,
+                                          vertical: 6,
                                         ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              Icons.link_rounded,
-                                              size: 13,
-                                              color: t.textSecondary,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              'Image URL',
-                                              style: TextStyle(
-                                                color: t.textPrimary,
-                                                fontSize: 11.5,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
+                                        decoration: BoxDecoration(
+                                          color: Colors.redAccent
+                                              .withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 14,
+                                          color: Colors.redAccent,
                                         ),
                                       ),
                                     ),
-                                    if (_customCoverBytes != null ||
-                                        _coverUrlController.text.isNotEmpty)
-                                      PressableScale(
-                                        onTap: () {
-                                          setState(() {
-                                            _customCoverBytes = null;
-                                            _coverUrlController.clear();
-                                            _showCoverUrlField = false;
-                                          });
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 5),
-                                          decoration: BoxDecoration(
-                                            color: Colors.redAccent
-                                                .withValues(alpha: 0.12),
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                          ),
-                                          child: const Icon(
-                                            Icons.delete_outline_rounded,
-                                            size: 13,
-                                            color: Colors.redAccent,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    if (_showCoverUrlField) ...[
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _coverUrlController,
-                        style: TextStyle(color: t.textPrimary, fontSize: 13),
-                        cursorColor: t.accent,
-                        decoration: InputDecoration(
-                          hintText: 'Paste direct image URL (jpg, png, webp)',
-                          hintStyle: TextStyle(
-                              color: t.textTertiary, fontSize: 12),
-                          filled: true,
-                          fillColor: t.surfaceCard,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: t.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: t.accent),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-
-                    // Reading Status Chips
-                    Text(
-                      'READING STATUS',
-                      style: TextStyle(
-                        color: t.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final s in ReadStatus.values)
-                          _StatusPill(
-                            label: s.label,
-                            selected: _status == s,
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              setState(() => _status = s);
-                            },
-                          ),
                       ],
                     ),
+                  ),
+
+                  if (_showCoverUrlField) ...[
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _coverUrlController,
+                      style: TextStyle(color: t.textPrimary, fontSize: 13.5),
+                      cursorColor: t.accent,
+                      decoration: InputDecoration(
+                        hintText: 'Paste direct image URL (jpg, png, webp)',
+                        hintStyle:
+                            TextStyle(color: t.textTertiary, fontSize: 12.5),
+                        filled: true,
+                        fillColor: t.surfaceCard,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: t.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: t.accent),
+                        ),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
                   ],
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 18),
+
+                  // Reading Status Chips
+                  Text(
+                    'READING STATUS',
+                    style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final s in ReadStatus.values)
+                        _StatusPill(
+                          label: s.label,
+                          selected: _status == s,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _status = s);
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 26),
 
                   // Action Buttons
                   Row(
@@ -622,7 +699,7 @@ class _SeriesFormState extends State<SeriesForm> {
                           child: Text(
                             _editing ? 'Save Changes' : 'Save to Shelf',
                             style: const TextStyle(
-                              fontSize: 14.5,
+                              fontSize: 15,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -645,7 +722,7 @@ class _SeriesFormState extends State<SeriesForm> {
                             child: const Text(
                               'Save & Read',
                               style: TextStyle(
-                                fontSize: 14.5,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
@@ -676,7 +753,7 @@ class _SeriesFormState extends State<SeriesForm> {
         imageUrl: customUrl,
         fit: BoxFit.cover,
         errorWidget: (_, __, ___) => Center(
-          child: Icon(Icons.broken_image_rounded, size: 20, color: t.textTertiary),
+          child: Icon(Icons.broken_image_rounded, size: 22, color: t.textTertiary),
         ),
       );
     }
@@ -686,12 +763,12 @@ class _SeriesFormState extends State<SeriesForm> {
         imageUrl: existingCover,
         fit: BoxFit.cover,
         errorWidget: (_, __, ___) => Center(
-          child: Icon(Icons.book_rounded, size: 20, color: t.textTertiary),
+          child: Icon(Icons.book_rounded, size: 22, color: t.textTertiary),
         ),
       );
     }
     return Center(
-      child: Icon(Icons.image_outlined, size: 20, color: t.textTertiary),
+      child: Icon(Icons.image_outlined, size: 24, color: t.textTertiary),
     );
   }
 }
@@ -715,10 +792,10 @@ class _StatusPill extends StatelessWidget {
       scaleDown: 0.95,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: selected ? t.accent : t.surfaceCard,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected ? t.accent : t.border,
             width: selected ? 1.4 : 1,
@@ -728,7 +805,7 @@ class _StatusPill extends StatelessWidget {
           label,
           style: TextStyle(
             color: selected ? const Color(0xFF04130C) : t.textSecondary,
-            fontSize: 12,
+            fontSize: 12.5,
             fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
           ),
         ),

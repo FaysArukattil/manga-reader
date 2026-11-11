@@ -1591,11 +1591,7 @@ class _LibraryPageState extends State<LibraryPage> {
                       )
                     else if (!hasShelf)
                       SliverToBoxAdapter(
-                        child: _EmptyState(
-                          onAdd: () => _openForm(),
-                          onAddWithLink: (url, title) =>
-                              _openForm(url: url, title: title),
-                        ),
+                        child: _EmptyState(onAdd: () => _openForm()),
                       )
                     else if (state.visible.isEmpty)
                       SliverToBoxAdapter(
@@ -2129,44 +2125,17 @@ class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant _PinnedBarDelegate old) => true;
 }
 
-class _EmptyState extends StatefulWidget {
-  const _EmptyState({
-    required this.onAdd,
-    this.onAddWithLink,
-  });
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onAdd});
 
   final VoidCallback onAdd;
-  final void Function(String url, String? title)? onAddWithLink;
-
-  @override
-  State<_EmptyState> createState() => _EmptyStateState();
-}
-
-class _EmptyStateState extends State<_EmptyState> {
-  String? _clipboardUrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkClipboard();
-  }
-
-  Future<void> _checkClipboard() async {
-    try {
-      final data = await Clipboard.getData(Clipboard.kTextPlain);
-      final text = data?.text?.trim() ?? '';
-      if (text.startsWith('http://') || text.startsWith('https://')) {
-        if (mounted) setState(() => _clipboardUrl = text);
-      }
-    } catch (_) {}
-  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 56),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -2219,60 +2188,13 @@ class _EmptyStateState extends State<_EmptyState> {
               ),
             ),
           ),
-
-          // Detected link chip (one-tap paste)
-          if (_clipboardUrl != null) ...[
-            const SizedBox(height: 20),
-            PressableScale(
-              onTap: () {
-                HapticFeedback.mediumImpact();
-                if (widget.onAddWithLink != null) {
-                  widget.onAddWithLink!(_clipboardUrl!, null);
-                } else {
-                  widget.onAdd();
-                }
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: t.accent.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: t.accent.withValues(alpha: 0.35),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.content_paste_rounded, size: 16, color: t.accent),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        'Paste copied link (${Uri.tryParse(_clipboardUrl!)?.host ?? "webpage"})',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: t.accent,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(Icons.arrow_forward_rounded, size: 14, color: t.accent),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
 
           // Primary Paste Button
           PressableScale(
             onTap: () {
               HapticFeedback.mediumImpact();
-              widget.onAdd();
+              onAdd();
             },
             child: Container(
               height: 52,

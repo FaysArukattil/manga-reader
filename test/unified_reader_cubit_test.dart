@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shelfmark/blocs/unified_reader_cubit.dart';
 import 'package:shelfmark/models/series.dart';
+import 'package:shelfmark/services/page_cache.dart';
 import 'package:shelfmark/services/reader/chapter_source.dart';
 import 'package:shelfmark/services/scrape/site_adapter.dart';
 
@@ -127,6 +128,52 @@ void main() {
       expect(cubit.state.isAllCaughtUp, isTrue);
 
       await cubit.close();
+    });
+
+    test('ReaderPageItem.buildGroupedItems combines 111 sliced strips into ~28 seamless pages', () {
+      final slices111 = List.generate(
+        111,
+        (i) => 'https://imgsrv5.com/comic/chapter-59/$i.jpg',
+      );
+
+      final pages = ReaderPageItem.buildGroupedItems(
+        rawPages: slices111,
+        chapterId: 'ch59',
+        chapterLabel: 'Chapter 59',
+      );
+
+      // Group size should be 4 slices per page -> 28 pages
+      expect(pages.length, equals(28));
+      expect(pages[0].allUrls.length, equals(4));
+      expect(pages[0].allUrls, equals([
+        'https://imgsrv5.com/comic/chapter-59/0.jpg',
+        'https://imgsrv5.com/comic/chapter-59/1.jpg',
+        'https://imgsrv5.com/comic/chapter-59/2.jpg',
+        'https://imgsrv5.com/comic/chapter-59/3.jpg',
+      ]));
+      expect(pages[0].totalInChapter, equals(28));
+      expect(pages[27].allUrls.length, equals(3)); // 111 - 27*4 = 3 remaining slices
+
+      // Test matchesKey works for any slice in the page
+      final keyForSlice2 = PageCache.keyFor('https://imgsrv5.com/comic/chapter-59/2.jpg');
+      expect(pages[0].matchesKey(keyForSlice2), isTrue);
+    });
+
+    test('ReaderPageItem.buildGroupedItems leaves standard 28-page chapters untouched', () {
+      final slices28 = List.generate(
+        28,
+        (i) => 'https://imgsrv5.com/comic/chapter-58/$i.jpg',
+      );
+
+      final pages = ReaderPageItem.buildGroupedItems(
+        rawPages: slices28,
+        chapterId: 'ch58',
+        chapterLabel: 'Chapter 58',
+      );
+
+      expect(pages.length, equals(28));
+      expect(pages[0].allUrls.length, equals(1));
+      expect(pages[0].url, equals('https://imgsrv5.com/comic/chapter-58/0.jpg'));
     });
 
     test('emits needsVerification when VerificationRequiredException is thrown',

@@ -92,7 +92,10 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
     with WidgetsBindingObserver {
   late final UnifiedReaderCubit _cubit;
   PageController? _pageController;
+  final PhysicsPageTurnController _turnController = PhysicsPageTurnController();
   bool _leaving = false;
+  bool _showSettingsHint = true;
+  Timer? _hintTimer;
 
   @override
   void initState() {
@@ -108,15 +111,30 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
 
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+    _hintTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _showSettingsHint = false);
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _hintTimer?.cancel();
     _pageController?.dispose();
+    _turnController.dispose();
     _cubit.close();
     super.dispose();
+  }
+
+  void _jumpTo(int targetIdx) {
+    if (targetIdx < 0 || targetIdx >= _cubit.state.pages.length) return;
+    if (_pageController?.hasClients ?? false) {
+      _pageController!.jumpToPage(targetIdx);
+    }
+    _turnController.jumpToPage(targetIdx);
+    _cubit.onPageChanged(targetIdx);
   }
 
   @override
@@ -160,6 +178,10 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
   }
 
   void _showHiddenSettings() {
+    _hintTimer?.cancel();
+    if (_showSettingsHint && mounted) {
+      setState(() => _showSettingsHint = false);
+    }
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -259,8 +281,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                               p.pageIndex == offsetInChapter,
                         );
                         if (targetIdx >= 0) {
-                          _pageController?.jumpToPage(targetIdx);
-                          _cubit.onPageChanged(targetIdx);
+                          _jumpTo(targetIdx);
                         }
                       },
                     ),
@@ -473,10 +494,17 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
           backgroundColor: Colors.black,
           body: BlocConsumer<UnifiedReaderCubit, UnifiedReaderState>(
             listenWhen: (prev, curr) =>
-                prev.pages.length != curr.pages.length &&
-                _pageController != null,
+                prev.currentIndex != curr.currentIndex ||
+                prev.pages.length != curr.pages.length,
             listener: (context, state) {
-              // Seamless append keeps pageController intact
+              if (_pageController?.hasClients ?? false) {
+                if (_pageController!.page?.round() != state.currentIndex) {
+                  _pageController!.jumpToPage(state.currentIndex);
+                }
+              }
+              if (_turnController.currentPage != state.currentIndex) {
+                _turnController.jumpToPage(state.currentIndex);
+              }
             },
             builder: (context, state) {
               if (state.loading) {
@@ -543,6 +571,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                       child: _StreamPager(
                         pages: state.pages,
                         controller: _pageController!,
+                        turnController: _turnController,
                         initialPage: state.currentIndex,
                         vertical: state.vertical,
                         rtl: state.rtl,
@@ -601,6 +630,74 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                       ),
                     ),
                   ),
+
+                  // Floating press-and-hold tutorial banner
+                  if (_showSettingsHint)
+                    Positioned(
+                      top: MediaQuery.paddingOf(context).top + 16,
+                      left: 20,
+                      right: 20,
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _showSettingsHint = false);
+                            _showHiddenSettings();
+                          },
+                          child: AnimatedOpacity(
+                            opacity: _showSettingsHint ? 1.0 : 0.0,
+                            duration: const Duration(milliseconds: 300),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 9,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF13171F).withValues(alpha: 0.94),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: const Color(0xFF00B96B).withValues(alpha: 0.5),
+                                  width: 1,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(5),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF00B96B).withValues(alpha: 0.2),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.touch_app_rounded,
+                                      color: Color(0xFF00B96B),
+                                      size: 15,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 9),
+                                  const Text(
+                                    'Press & hold anywhere for reader settings',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: -0.1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               );
             },
@@ -697,6 +794,7 @@ class _StreamPager extends StatefulWidget {
   const _StreamPager({
     required this.pages,
     required this.controller,
+    required this.turnController,
     required this.initialPage,
     required this.vertical,
     required this.rtl,
@@ -710,6 +808,7 @@ class _StreamPager extends StatefulWidget {
 
   final List<ReaderPageItem> pages;
   final PageController controller;
+  final PhysicsPageTurnController turnController;
   final int initialPage;
   final bool vertical;
   final bool rtl;
@@ -727,13 +826,11 @@ class _StreamPager extends StatefulWidget {
 class _StreamPagerState extends State<_StreamPager> {
   int get _count => widget.pages.length + (widget.isAllCaughtUp ? 1 : 0);
   int? _lastSoundPage;
-  late final PhysicsPageTurnController _turnController;
 
   @override
   void initState() {
     super.initState();
     _lastSoundPage = widget.initialPage;
-    _turnController = PhysicsPageTurnController();
     widget.controller.addListener(_syncFromPageController);
     ReaderAudio.instance.init();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -753,15 +850,14 @@ class _StreamPagerState extends State<_StreamPager> {
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromPageController);
-    _turnController.dispose();
     super.dispose();
   }
 
   void _syncFromPageController() {
     if (widget.controller.hasClients && widget.controller.page != null) {
       final target = widget.controller.page!.round();
-      if (_turnController.currentPage != target) {
-        _turnController.jumpToPage(target);
+      if (widget.turnController.currentPage != target) {
+        widget.turnController.jumpToPage(target);
       }
     }
   }
@@ -780,15 +876,17 @@ class _StreamPagerState extends State<_StreamPager> {
       final n = page + i;
       if (n < widget.pages.length) {
         final item = widget.pages[n];
-        precacheImage(
-          CachedNetworkImageProvider(
-            item.url,
-            cacheKey: item.pageKey,
-            cacheManager: PageCache.instance,
-            headers: CfSession.imageHeaders(item.url, item.referer),
-          ),
-          context,
-        );
+        for (final u in item.allUrls) {
+          precacheImage(
+            CachedNetworkImageProvider(
+              u,
+              cacheKey: PageCache.keyFor(u),
+              cacheManager: PageCache.instance,
+              headers: CfSession.imageHeaders(u, item.referer),
+            ),
+            context,
+          );
+        }
       }
     }
   }
@@ -796,24 +894,32 @@ class _StreamPagerState extends State<_StreamPager> {
   bool _isAnimatingPage = false;
   void _go(int delta) {
     if (_isAnimatingPage) return;
-    final cur = widget.controller.hasClients
-        ? (widget.controller.page?.round() ?? widget.initialPage)
-        : widget.initialPage;
-    final target = cur + delta;
-    if (target < 0 || target >= _count) return;
-    _isAnimatingPage = true;
-    try {
-      HapticFeedback.lightImpact();
-    } catch (_) {}
-    widget.controller
-        .animateToPage(
-      target,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-    )
-        .then((_) {
-      _isAnimatingPage = false;
-    });
+    if (widget.vertical) {
+      final cur = widget.controller.hasClients
+          ? (widget.controller.page?.round() ?? widget.initialPage)
+          : widget.initialPage;
+      final target = cur + delta;
+      if (target < 0 || target >= _count) return;
+      _isAnimatingPage = true;
+      try {
+        HapticFeedback.lightImpact();
+      } catch (_) {}
+      widget.controller
+          .animateToPage(
+        target,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      )
+          .then((_) {
+        _isAnimatingPage = false;
+      });
+    } else {
+      if (delta > 0) {
+        widget.turnController.nextPage();
+      } else {
+        widget.turnController.prevPage();
+      }
+    }
   }
 
   Widget _buildPageItem(BuildContext context, int i) {
@@ -908,7 +1014,7 @@ class _StreamPagerState extends State<_StreamPager> {
     }
 
     return PhysicsPageTurn(
-      controller: _turnController,
+      controller: widget.turnController,
       itemCount: _count,
       initialPage: widget.initialPage,
       rtl: widget.rtl,
@@ -1050,13 +1156,22 @@ class _PageImage extends StatefulWidget {
 
 class _PageImageState extends State<_PageImage> {
   final ScrollController _scrollController = ScrollController();
-  int _retryNonce = 0;
-  int _autoRetries = 0;
   double _dragStartY = 0;
   DateTime _dragStartTime = DateTime.now();
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
   }
@@ -1067,161 +1182,313 @@ class _PageImageState extends State<_PageImage> {
       color: Colors.black,
       width: double.infinity,
       height: double.infinity,
-      child: CachedNetworkImage(
-        key: ValueKey('${widget.item.pageKey}#$_retryNonce'),
-        imageUrl: widget.item.url,
-        cacheKey: widget.item.pageKey,
-        cacheManager: PageCache.instance,
-        httpHeaders:
-            CfSession.imageHeaders(widget.item.url, widget.item.referer),
-        fadeInDuration: Duration.zero,
-        imageBuilder: (context, imageProvider) {
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              return Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: (e) {
-                  _dragStartY = e.position.dy;
-                  _dragStartTime = DateTime.now();
-                },
-                onPointerUp: (e) {
-                  if (!widget.isVertical) return;
-                  final dy = e.position.dy - _dragStartY;
-                  final dt = math.max(
-                      1, DateTime.now().difference(_dragStartTime).inMilliseconds);
-                  final vy = (dy / dt) * 1000.0;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final hasScroll = _scrollController.hasClients &&
+              _scrollController.position.haveDimensions &&
+              _scrollController.position.maxScrollExtent > 40;
+          final atBottom = hasScroll &&
+              _scrollController.offset >=
+                  _scrollController.position.maxScrollExtent - 25;
+          final showHint = hasScroll && !atBottom;
 
-                  final hasScroll = _scrollController.hasClients &&
-                      _scrollController.position.maxScrollExtent > 30;
-                  final atBottom = !hasScroll ||
-                      (_scrollController.hasClients &&
-                          _scrollController.offset >=
-                              _scrollController.position.maxScrollExtent - 20);
-                  final atTop = !hasScroll ||
-                      (_scrollController.hasClients &&
-                          _scrollController.offset <= 20);
+          return Stack(
+            children: [
+              // Scrollable content (single image or multiple seamless slices)
+              Positioned.fill(
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (e) {
+                    _dragStartY = e.position.dy;
+                    _dragStartTime = DateTime.now();
+                  },
+                  onPointerUp: (e) {
+                    if (!widget.isVertical) return;
+                    final dy = e.position.dy - _dragStartY;
+                    final dt = math.max(1,
+                        DateTime.now().difference(_dragStartTime).inMilliseconds);
+                    final vy = (dy / dt) * 1000.0;
 
-                  if ((dy < -40 || vy < -200) && atBottom) {
-                    widget.onNextPage?.call();
-                  } else if ((dy > 40 || vy > 200) && atTop) {
-                    widget.onPrevPage?.call();
-                  }
-                },
-                child: InteractiveViewer(
-                  minScale: 1.0,
-                  maxScale: 3.5,
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    physics: widget.isVertical
-                        ? const BouncingScrollPhysics()
-                        : const ClampingScrollPhysics(),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minWidth: constraints.maxWidth,
-                        minHeight: constraints.maxHeight,
-                      ),
-                      child: Center(
-                        child: Image(
-                          image: imageProvider,
-                          width: constraints.maxWidth,
-                          fit: BoxFit.fitWidth,
-                          filterQuality: FilterQuality.medium,
+                    final atTop = !hasScroll ||
+                        (_scrollController.hasClients &&
+                            _scrollController.offset <= 20);
+
+                    if ((dy < -40 || vy < -200) && atBottom) {
+                      widget.onNextPage?.call();
+                    } else if ((dy > 40 || vy > 200) && atTop) {
+                      widget.onPrevPage?.call();
+                    }
+                  },
+                  child: InteractiveViewer(
+                    minScale: 1.0,
+                    maxScale: 3.5,
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      physics: widget.isVertical
+                          ? const BouncingScrollPhysics()
+                          : const ClampingScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minWidth: constraints.maxWidth,
+                          minHeight: constraints.maxHeight,
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final sliceUrl in widget.item.allUrls)
+                                _PageSliceImage(
+                                  key: ValueKey(sliceUrl),
+                                  url: sliceUrl,
+                                  width: constraints.maxWidth,
+                                  referer: widget.item.referer,
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              );
-            },
-          );
-        },
-        placeholder: (_, __) => const Center(
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Colors.white24,
-            ),
-          ),
-        ),
-        errorWidget: (_, url, error) {
-          CfDiag.log('image failed ${Uri.tryParse(url)?.host}: $error');
-          // One silent automatic retry (clears any half-written cache entry).
-          if (_autoRetries < 1) {
-            _autoRetries++;
-            WidgetsBinding.instance.addPostFrameCallback((_) async {
-              await PageCache.instance.removeFile(widget.item.pageKey);
-              if (mounted) setState(() => _retryNonce++);
-            });
-            return const Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white24,
+              ),
+
+              // Right-side scrollbar rail indicating content below
+              if (hasScroll)
+                Positioned(
+                  right: 4,
+                  top: 50,
+                  bottom: 50,
+                  child: LayoutBuilder(
+                    builder: (context, railConstraints) {
+                      final trackHeight = railConstraints.maxHeight;
+                      final maxExtent =
+                          _scrollController.position.maxScrollExtent;
+                      final offset =
+                          _scrollController.offset.clamp(0.0, maxExtent);
+                      final viewport =
+                          _scrollController.position.viewportDimension;
+                      final totalHeight = maxExtent + viewport;
+
+                      final thumbHeight = (viewport / totalHeight * trackHeight)
+                          .clamp(28.0, trackHeight);
+                      final thumbTop = maxExtent > 0
+                          ? (offset / maxExtent) * (trackHeight - thumbHeight)
+                          : 0.0;
+
+                      return IgnorePointer(
+                        child: Container(
+                          width: 3.5,
+                          height: trackHeight,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                top: thumbTop,
+                                left: 0,
+                                right: 0,
+                                height: thumbHeight,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF00B96B),
+                                    borderRadius: BorderRadius.circular(3),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF00B96B)
+                                            .withValues(alpha: 0.7),
+                                        blurRadius: 4,
+                                        spreadRadius: 0.5,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+              // Floating bottom pill hint: "Scroll down for more ↓"
+              Positioned(
+                bottom: 22,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  ignoring: !showHint,
+                  child: AnimatedOpacity(
+                    opacity: showHint ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF0F1116).withValues(alpha: 0.88),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: const Color(0xFF00B96B)
+                                .withValues(alpha: 0.45),
+                            width: 0.8,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              size: 16,
+                              color: Color(0xFF00B96B),
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Scroll down for more',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            );
-          }
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.broken_image_rounded,
-                      color: Colors.white30, size: 36),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "This page didn't load",
-                    style: TextStyle(color: Colors.white54, fontSize: 13),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      OutlinedButton(
-                        onPressed: () async {
-                          await PageCache.instance
-                              .removeFile(widget.item.pageKey);
-                          if (mounted) setState(() => _retryNonce++);
-                        },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white70,
-                          side: const BorderSide(color: Colors.white24),
-                        ),
-                        child: const Text('Retry'),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          final text = 'page: ${widget.item.url}\n'
-                              'referer: ${widget.item.referer}\n'
-                              'error: $error\n\n${CfDiag.dump()}';
-                          await Clipboard.setData(ClipboardData(text: text));
-                          if (context.mounted) {
-                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                              const SnackBar(
-                                content: Text('Debug info copied'),
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text(
-                          'Copy debug info',
-                          style: TextStyle(color: Colors.white38),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            ],
           );
         },
       ),
+    );
+  }
+}
+
+class _PageSliceImage extends StatefulWidget {
+  const _PageSliceImage({
+    super.key,
+    required this.url,
+    required this.width,
+    this.referer,
+  });
+
+  final String url;
+  final double width;
+  final String? referer;
+
+  @override
+  State<_PageSliceImage> createState() => _PageSliceImageState();
+}
+
+class _PageSliceImageState extends State<_PageSliceImage> {
+  int _retryNonce = 0;
+  int _autoRetries = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pageKey = PageCache.keyFor(widget.url);
+    return CachedNetworkImage(
+      key: ValueKey('$pageKey#$_retryNonce'),
+      imageUrl: widget.url,
+      cacheKey: pageKey,
+      cacheManager: PageCache.instance,
+      httpHeaders: CfSession.imageHeaders(widget.url, widget.referer),
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: Duration.zero,
+      width: widget.width,
+      fit: BoxFit.fitWidth,
+      imageBuilder: (context, imageProvider) {
+        return Image(
+          image: imageProvider,
+          width: widget.width,
+          fit: BoxFit.fitWidth,
+          filterQuality: FilterQuality.medium,
+        );
+      },
+      placeholder: (_, __) => Container(
+        width: widget.width,
+        height: math.min(widget.width * 1.3, 360),
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: const SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white24,
+          ),
+        ),
+      ),
+      errorWidget: (_, url, error) {
+        CfDiag.log('image slice failed ${Uri.tryParse(url)?.host}: $error');
+        if (_autoRetries < 1) {
+          _autoRetries++;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await PageCache.instance.removeFile(pageKey);
+            if (mounted) setState(() => _retryNonce++);
+          });
+          return Container(
+            width: widget.width,
+            height: 180,
+            alignment: Alignment.center,
+            child: const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white24,
+              ),
+            ),
+          );
+        }
+        return Container(
+          width: widget.width,
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          color: Colors.black,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.broken_image_rounded,
+                  color: Colors.white30, size: 28),
+              const SizedBox(height: 6),
+              const Text(
+                "Image slice failed to load",
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  await PageCache.instance.removeFile(pageKey);
+                  if (mounted) setState(() => _retryNonce++);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                ),
+                child: const Text('Retry', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

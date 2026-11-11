@@ -182,7 +182,7 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
       int targetIndex = 0;
       if (startPageKey != null) {
         final matchIdx = initialPages.indexWhere(
-          (p) => p.pageKey == startPageKey,
+          (p) => p.matchesKey(startPageKey!),
         );
         if (matchIdx >= 0) targetIndex = matchIdx;
       }
@@ -241,17 +241,11 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
 
     if (verifiedPages != null && verifiedPages.length >= 2) {
       final label = UrlTools.chapterLabel(chapterToLoad) ?? '';
-      final count = verifiedPages.length;
-      final pages = List.generate(
-        count,
-        (i) => ReaderPageItem(
-          url: verifiedPages[i],
-          chapterId: chapterToLoad,
-          chapterLabel: label,
-          pageIndex: i,
-          totalInChapter: count,
-          referer: chapterToLoad,
-        ),
+      final pages = ReaderPageItem.buildGroupedItems(
+        rawPages: verifiedPages,
+        chapterId: chapterToLoad,
+        chapterLabel: label,
+        referer: chapterToLoad,
       );
 
       _loadedChapterIds.add(chapterToLoad);
