@@ -288,5 +288,85 @@ void main() {
       expect(result.nextChapterUrl, isNull);
       expect(result.prevChapterUrl, equals('https://example.com/ch-92/'));
     });
+
+    test('extracts comix.to initial-data metadata and recognizes latest chapter', () async {
+      const html = r'''
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>The Fox-Eyed Villain of the Demon Academy · Ch.60</title>
+        </head>
+        <body class="rpage-body">
+          <div id="app-root"></div>
+          <script type="application/json" id="initial-data">
+          {
+            "page": "read",
+            "queries": {
+              "[\"manga\",\"detail\",\"5rj7\"]": {
+                "title": "The Fox-Eyed Villain of the Demon Academy",
+                "poster": {
+                  "large": "/images/covers/d9/6f/d96fe51439757583cf72f6e7de84a0969175c0d1.jpg"
+                },
+                "latestChapter": 60,
+                "firstChapterUrl": "/title/5rj7-the-fox-eyed-villain-of-the-demon-academy/6658172-chapter-1"
+              }
+            },
+            "read": {
+              "chapterId": 7301644,
+              "chapterNumber": 60
+            }
+          }
+          </script>
+        </body>
+      </html>
+      ''';
+
+      final doc = dom.Document.html(html);
+      final uri = Uri.parse(
+        'https://comix.to/title/5rj7-the-fox-eyed-villain-of-the-demon-academy/7301644-chapter-60',
+      );
+
+      final result = await adapter.extract(doc, uri);
+
+      expect(result.title, equals('The Fox-Eyed Villain of the Demon Academy'));
+      expect(
+        result.coverUrl,
+        equals(
+          'https://comix.to/images/covers/d9/6f/d96fe51439757583cf72f6e7de84a0969175c0d1.jpg',
+        ),
+      );
+      expect(
+        result.firstChapterUrl,
+        equals(
+          'https://comix.to/title/5rj7-the-fox-eyed-villain-of-the-demon-academy/6658172-chapter-1',
+        ),
+      );
+      // Because chapter 60 is latestChapter, nextChapterUrl must be null
+      expect(result.nextChapterUrl, isNull);
+    });
+
+    test('extracts images from comix.to rpage-main structure', () async {
+      const html = '''
+      <main class="rpage-main rpage-main--vertical">
+        <div class="rpage-main__inner">
+          <div class="rpage-page" data-page="1">
+            <img class="rpage-page__img" src="https://cdn.example.com/p1.webp" width="800" height="1200" />
+          </div>
+          <div class="rpage-page" data-page="2">
+            <img class="rpage-page__img" src="https://cdn.example.com/p2.webp" width="800" height="1200" />
+          </div>
+        </div>
+      </main>
+      ''';
+
+      final doc = dom.Document.html(html);
+      final uri = Uri.parse('https://comix.to/title/manga/ch-1');
+
+      final result = await adapter.extract(doc, uri);
+
+      expect(result.pages.length, equals(2));
+      expect(result.pages[0], equals('https://cdn.example.com/p1.webp'));
+      expect(result.pages[1], equals('https://cdn.example.com/p2.webp'));
+    });
   });
 }

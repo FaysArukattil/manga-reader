@@ -148,7 +148,9 @@ class WebScraper {
       '.chapter-content', '.chapter-images', '.viewer-cnt', '.vung-doc', '#vungdoc',
       '#images', '.comic-page', '.read-container', 'div[class*="reading-content"]',
       'div[class*="chapter-content"]', 'div[class*="read-container"]', '#divImage',
-      '.wp-manga-chapter-img', '.entry-content', '.page-break'
+      '.wp-manga-chapter-img', '.entry-content', '.page-break',
+      '.rpage-main__inner', '.rpage-main', '.rpage', 'main[class*="rpage"]',
+      '.rpage-view', '.swiper-wrapper'
     ];
     var items = [];
     function collect(list, insideReader) {
@@ -193,7 +195,14 @@ class WebScraper {
       '.viewer-cnt img',
       '#divImage img',
       '.comic-page img',
-      '.entry-content img'
+      '.entry-content img',
+      '.rpage-page__img',
+      '.rpage-page img',
+      '.rpage-main img',
+      '.rpage-main__inner img',
+      'img[class*="rpage"]',
+      '.rpage-zoom-container img',
+      '.scan-page img'
     ];
     for (var i = 0; i < pageSelectors.length; i++) {
       var found = collect(document.querySelectorAll(pageSelectors[i]), true);
@@ -323,13 +332,13 @@ class WebScraper {
 (function() {
   try {
     window.__smPages = [];
-    var els = document.querySelectorAll('canvas, img[src^="blob:"]');
+    var els = document.querySelectorAll('canvas, img[src^="blob:"], .rpage-page__img, .rpage-page img');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       var isCanvas = el.tagName === 'CANVAS';
-      var w = isCanvas ? el.width : el.naturalWidth;
-      var h = isCanvas ? el.height : el.naturalHeight;
-      if (!w || !h || w < 300 || h < 300) continue;
+      var w = isCanvas ? el.width : (el.naturalWidth || parseInt(el.getAttribute('width')) || 0);
+      var h = isCanvas ? el.height : (el.naturalHeight || parseInt(el.getAttribute('height')) || 0);
+      if (!w || !h || w < 200 || h < 200) continue;
       try {
         var c = el;
         if (!isCanvas) {
@@ -382,12 +391,46 @@ class WebScraper {
 
     var nextUrl = null;
     var prevUrl = null;
+    var isLatest = false;
 
-    for (var i = 0; i < nextSelectors.length; i++) {
-      var el = document.querySelector(nextSelectors[i]);
-      if (el && el.href && el.href.indexOf('http') === 0 && !isDisabled(el)) {
-        nextUrl = el.href;
-        break;
+    // Check SPA syncData & initial-data scripts (comix.to etc.)
+    var syncData = document.getElementById('syncData');
+    if (syncData && syncData.textContent) {
+      try {
+        var s = JSON.parse(syncData.textContent);
+        if (s.next_chapter_url && s.next_chapter_url.indexOf('http') === 0) {
+          nextUrl = s.next_chapter_url;
+        } else if (s.next_chapter_url === "") {
+          isLatest = true;
+          nextUrl = null;
+        }
+      } catch (e) {}
+    }
+
+    var initData = document.getElementById('initial-data');
+    if (initData && initData.textContent) {
+      try {
+        var id = JSON.parse(initData.textContent);
+        if (id.read && id.queries) {
+          var curNum = id.read.chapterNumber;
+          for (var qk in id.queries) {
+            var q = id.queries[qk];
+            if (q && q.latestChapter && curNum >= q.latestChapter) {
+              isLatest = true;
+              nextUrl = null;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!isLatest) {
+      for (var i = 0; i < nextSelectors.length; i++) {
+        var el = document.querySelector(nextSelectors[i]);
+        if (el && el.href && el.href.indexOf('http') === 0 && !isDisabled(el)) {
+          nextUrl = el.href;
+          break;
+        }
       }
     }
 
@@ -427,7 +470,7 @@ class WebScraper {
           if (n > curNum && n < bestNextN) { bestNextN = n; bestNext = u.href; }
           if (n < curNum && n > bestPrevN) { bestPrevN = n; bestPrev = u.href; }
         }
-        if (!nextUrl && bestNext) nextUrl = bestNext;
+        if (!isLatest && !nextUrl && bestNext) nextUrl = bestNext;
         if (!prevUrl && bestPrev) prevUrl = bestPrev;
       }
     } catch (e) {}
@@ -460,7 +503,7 @@ class WebScraper {
       if (curIdx >= 0) {
         var targetNextIdx = isDesc ? curIdx - 1 : curIdx + 1;
         var targetPrevIdx = isDesc ? curIdx + 1 : curIdx - 1;
-        if (targetNextIdx >= 0 && targetNextIdx < chapters.length) {
+        if (!isLatest && targetNextIdx >= 0 && targetNextIdx < chapters.length) {
           if (!nextUrl) nextUrl = chapters[targetNextIdx].url;
         } else {
           // At the newest chapter in catalogue! There is NO next chapter.

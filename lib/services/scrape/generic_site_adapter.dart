@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:html/dom.dart' as dom;
 
 import '../../core/url_tools.dart';
@@ -32,6 +33,12 @@ class GenericSiteAdapter implements SiteAdapter {
     '#divImage',
     '.wp-manga-chapter-img',
     '.scan-page',
+    '.rpage-main__inner',
+    '.rpage-main',
+    '.rpage',
+    'main[class*="rpage"]',
+    '.rpage-view',
+    '.swiper-wrapper',
   ];
 
   /// Whole-token matches only. Substring matching used to reject any URL that
@@ -142,6 +149,12 @@ class GenericSiteAdapter implements SiteAdapter {
         '.comic-page img',
         '.entry-content img',
         '.scan-page img',
+        '.rpage-page__img',
+        '.rpage-page img',
+        '.rpage-main img',
+        '.rpage-main__inner img',
+        'img[class*="rpage"]',
+        '.rpage-zoom-container img',
       ];
       for (final sel in directSelectors) {
         final found = document.querySelectorAll(sel);
@@ -197,9 +210,68 @@ class GenericSiteAdapter implements SiteAdapter {
     // 6. Extract full chapter catalogue
     final catalogue = _extractChapterCatalogue(document, pageUri);
 
+    // 6b. Check for SPA JSON metadata (comix.to etc.)
+    final initDataEl = document.querySelector('script#initial-data');
+    String? spaTitle;
+    String? spaCover;
+    String? spaFirstChapter;
+    bool spaIsLatest = false;
+    if (initDataEl != null && initDataEl.text.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(initDataEl.text);
+        if (parsed is Map) {
+          final queries = parsed['queries'];
+          final read = parsed['read'];
+          int? curNum;
+          if (read is Map && read['chapterNumber'] != null) {
+            curNum = (read['chapterNumber'] as num?)?.toInt();
+          }
+          if (queries is Map) {
+            for (final val in queries.values) {
+              if (val is Map) {
+                if (val['title'] != null && spaTitle == null) {
+                  spaTitle = val['title'].toString();
+                }
+                if (val['firstChapterUrl'] != null && spaFirstChapter == null) {
+                  spaFirstChapter =
+                      _resolveUrl(val['firstChapterUrl'].toString(), pageUri);
+                }
+                final poster = val['poster'];
+                if (poster is Map && spaCover == null) {
+                  final pUrl = poster['large'] ?? poster['medium'];
+                  if (pUrl != null) {
+                    spaCover = _resolveUrl(pUrl.toString(), pageUri);
+                  }
+                }
+                final latestChapter = (val['latestChapter'] as num?)?.toInt();
+                if (latestChapter != null &&
+                    curNum != null &&
+                    curNum >= latestChapter) {
+                  spaIsLatest = true;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    final syncDataEl = document.querySelector('script#syncData');
+    if (syncDataEl != null && syncDataEl.text.isNotEmpty) {
+      try {
+        final sParsed = jsonDecode(syncDataEl.text);
+        if (sParsed is Map) {
+          final nu = sParsed['next_chapter_url']?.toString();
+          if (nu != null && nu.isEmpty) {
+            spaIsLatest = true;
+          }
+        }
+      } catch (_) {}
+    }
+
     // 7. Discover Next & Prev Chapter URLs
     final isLatestInCatalogue =
-        isCatalogueLatest(catalogue, pageUri.toString());
+        isCatalogueLatest(catalogue, pageUri.toString()) || spaIsLatest;
     final nextUrl = isLatestInCatalogue
         ? null
         : (_findNavigationLink(document, pageUri, isNext: true) ??
@@ -209,7 +281,9 @@ class GenericSiteAdapter implements SiteAdapter {
         _findCatalogueNeighbor(catalogue, pageUri.toString(), isNext: false);
 
     // 8. Extract title and chapter label
-    final title = _extractTitle(document);
+    final title = (spaTitle != null && spaTitle.isNotEmpty)
+        ? UrlTools.cleanTitle(spaTitle)
+        : _extractTitle(document);
     final chapterLabel = UrlTools.chapterLabel(pageUri.toString()) ??
         _extractChapterHeading(document);
 
@@ -222,8 +296,9 @@ class GenericSiteAdapter implements SiteAdapter {
       prevChapterUrl: prevUrl,
       isWebtoon: pages.length >= 2,
       availableChapters: catalogue,
-      coverUrl: coverUrl ?? (pages.isNotEmpty ? pages.first : null),
+      coverUrl: coverUrl ?? spaCover ?? (pages.isNotEmpty ? pages.first : null),
       firstChapterUrl: startReadingUrl ??
+          spaFirstChapter ??
           (catalogue.isNotEmpty ? catalogue.first.url : null),
     );
   }

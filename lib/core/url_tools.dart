@@ -22,7 +22,7 @@ class UrlTools {
     caseSensitive: false,
   );
   static final RegExp _titleSeparators = RegExp(
-    r'\s[|\u2013\u2014\u2022]\s|\s-\s',
+    r'\s[|\u2013\u2014\u2022\u00b7]\s|\s-\s',
   );
   static final RegExp _trailingNoise = RegExp(
     r'(\s+(manga|manhwa|manhua|webtoon|online|free|raw|english|chapter))+$',
@@ -114,6 +114,7 @@ class UrlTools {
     out = out.replaceAll(_chapterAnywhere, '');
     out = out.replaceFirst(RegExp(r'^read\s+', caseSensitive: false), '');
     out = out.replaceFirst(_trailingNoise, '');
+    out = out.replaceAll(RegExp(r'[\s|·•\u2013\u2014\-]+$'), '');
     return out.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
