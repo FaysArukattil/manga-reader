@@ -17,7 +17,6 @@ import '../theme/app_colors.dart';
 import '../theme/components/pressable_scale.dart';
 import '../theme/components/shimmer_box.dart';
 import 'components/brand_logo.dart';
-import 'discover_page.dart';
 import 'md_detail_page.dart';
 import 'series_card.dart';
 import 'series_form.dart';
@@ -110,6 +109,10 @@ class _LibraryPageState extends State<LibraryPage> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
+      backgroundColor: context.tokens.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (_) =>
           SeriesForm(existing: existing, initialUrl: url, initialTitle: title),
     );
@@ -145,43 +148,115 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Future<void> _showActions(Series s) async {
     final bloc = context.read<LibraryBloc>();
+    final t = context.tokens;
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(
-                s.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with cover artwork, title, and metadata
+              Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 48,
+                      height: 66,
+                      child: SeriesCover(series: s, memCacheWidth: 160),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: t.surfaceCard,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: t.border),
+                              ),
+                              child: Text(
+                                s.category ?? s.status.label,
+                                style: TextStyle(
+                                  color: t.accent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                s.host,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: t.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              subtitle: Text(
-                '${s.host} · Category: ${s.category ?? s.status.label}',
+              const SizedBox(height: 20),
+              _SheetActionTile(
+                icon: Icons.drive_file_move_rounded,
+                iconColor: t.accent,
+                title: 'Move to Category',
+                subtitle: 'Organize into a custom category',
+                onTap: () => Navigator.pop(sheetContext, 'move'),
               ),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.drive_file_move_outlined,
-                color: AppColors.primary,
+              const SizedBox(height: 8),
+              _SheetActionTile(
+                icon: Icons.edit_rounded,
+                iconColor: Colors.blueAccent,
+                title: 'Edit Details',
+                subtitle: 'Update title, chapter or status',
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
               ),
-              title: const Text('Move to Category'),
-              subtitle: Text(s.category ?? s.status.label),
-              onTap: () => Navigator.pop(sheetContext, 'move'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit'),
-              onTap: () => Navigator.pop(sheetContext, 'edit'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('Remove from shelf'),
-              onTap: () => Navigator.pop(sheetContext, 'delete'),
-            ),
-          ],
+              const SizedBox(height: 8),
+              _SheetActionTile(
+                icon: Icons.delete_outline_rounded,
+                iconColor: Colors.redAccent,
+                title: 'Remove from shelf',
+                subtitle: 'Delete series and saved progress',
+                destructive: true,
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -191,22 +266,12 @@ class _LibraryPageState extends State<LibraryPage> {
     } else if (action == 'edit') {
       _openForm(existing: s);
     } else if (action == 'delete') {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Remove from shelf?'),
-          content: Text('"${s.title}" and its saved progress will be deleted.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Remove'),
-            ),
-          ],
-        ),
+      final ok = await _showConfirmDialog(
+        title: 'Remove from shelf?',
+        content: '"${s.title}" and its saved reading progress will be removed from your shelf.',
+        confirmLabel: 'Remove',
+        isDestructive: true,
+        icon: Icons.delete_sweep_rounded,
       );
       if (ok == true && mounted) {
         bloc.add(LibraryDeleteRequested(s));
@@ -217,68 +282,134 @@ class _LibraryPageState extends State<LibraryPage> {
   void _showMoveCategorySheet(Series s) {
     final bloc = context.read<LibraryBloc>();
     final categories = bloc.state.categories;
+    final t = context.tokens;
 
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(
-                'Move "${s.title}" to Category',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const Divider(),
-            ...categories.map((cat) {
-              final isCurrent = (s.category ?? s.status.label).toLowerCase() ==
-                  cat.toLowerCase();
-              return ListTile(
-                leading: Icon(
-                  isCurrent ? Icons.check_circle : Icons.folder_outlined,
-                  color: isCurrent
-                      ? AppColors.primary
-                      : sheetContext.tokens.textSecondary,
-                ),
-                title: Text(
-                  cat,
-                  style: TextStyle(
-                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                    color: isCurrent
-                        ? AppColors.primary
-                        : sheetContext.tokens.textPrimary,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Move to Category',
+                          style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          s.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: t.textSecondary,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  bloc.add(LibraryMoveSeriesRequested(s, cat));
-                  _snack('Moved to "$cat"');
-                },
-              );
-            }),
-            ListTile(
-              leading: const Icon(Icons.add, color: AppColors.primary),
-              title: const Text(
-                'Create New Category',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w600,
-                ),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      _showAddCategoryDialog(moveSeries: s);
+                    },
+                    icon: Icon(Icons.add_rounded, size: 16, color: t.accent),
+                    label: Text(
+                      'New',
+                      style: TextStyle(
+                        color: t.accent,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _showAddCategoryDialog(moveSeries: s);
-              },
-            ),
-            const SizedBox(height: 12),
-          ],
+              const SizedBox(height: 16),
+              ...categories.map((cat) {
+                final isCurrent =
+                    (s.category ?? s.status.label).toLowerCase() ==
+                        cat.toLowerCase();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: PressableScale(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.pop(sheetContext);
+                      bloc.add(LibraryMoveSeriesRequested(s, cat));
+                      _snack('Moved to "$cat"');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isCurrent
+                            ? t.accent.withValues(alpha: 0.12)
+                            : t.surfaceCard,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isCurrent ? t.accent : t.border,
+                          width: isCurrent ? 1.4 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isCurrent
+                                ? Icons.check_circle_rounded
+                                : Icons.folder_outlined,
+                            size: 20,
+                            color: isCurrent ? t.accent : t.textSecondary,
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              cat,
+                              style: TextStyle(
+                                color: isCurrent ? t.accent : t.textPrimary,
+                                fontSize: 14.5,
+                                fontWeight: isCurrent
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (isCurrent)
+                            Text(
+                              'Current',
+                              style: TextStyle(
+                                color: t.accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -286,66 +417,70 @@ class _LibraryPageState extends State<LibraryPage> {
 
   void _showCategoryOptions(String cat) {
     final bloc = context.read<LibraryBloc>();
+    final t = context.tokens;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
                 cat,
-                style: const TextStyle(
+                style: TextStyle(
+                  color: t.textPrimary,
                   fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-              subtitle: const Text('Category Options'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Rename Category'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _showRenameCategoryDialog(cat);
-              },
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title: const Text(
-                'Delete Category',
-                style: TextStyle(color: Colors.redAccent),
+              const SizedBox(height: 2),
+              Text(
+                'Category options',
+                style: TextStyle(color: t.textSecondary, fontSize: 12.5),
               ),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (dContext) => AlertDialog(
-                    title: Text('Delete "$cat"?'),
-                    content: const Text(
-                      'Books in this category will not be deleted, they will simply lose this category label.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dContext, false),
-                        child: const Text('Cancel'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(dContext, true),
-                        child: const Text('Delete'),
-                      ),
-                    ],
-                  ),
-                );
-                if (ok == true && mounted) {
-                  bloc.add(LibraryCategoryRemoved(cat));
-                  _snack('Deleted category "$cat"');
-                }
-              },
-            ),
-          ],
+              const SizedBox(height: 16),
+              _SheetActionTile(
+                icon: Icons.edit_rounded,
+                iconColor: t.accent,
+                title: 'Rename Category',
+                subtitle: 'Change name on your shelf',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showRenameCategoryDialog(cat);
+                },
+              ),
+              const SizedBox(height: 8),
+              _SheetActionTile(
+                icon: Icons.delete_outline_rounded,
+                iconColor: Colors.redAccent,
+                title: 'Delete Category',
+                subtitle: 'Books in this category will keep their series',
+                destructive: true,
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final ok = await _showConfirmDialog(
+                    title: 'Delete "$cat"?',
+                    content:
+                        'Books in this category will not be deleted, they will simply lose this category label.',
+                    confirmLabel: 'Delete',
+                    isDestructive: true,
+                    icon: Icons.folder_delete_rounded,
+                  );
+                  if (ok == true && mounted) {
+                    bloc.add(LibraryCategoryRemoved(cat));
+                    _snack('Deleted category "$cat"');
+                  }
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -354,53 +489,120 @@ class _LibraryPageState extends State<LibraryPage> {
   void _showAddCategoryDialog({Series? moveSeries}) {
     final bloc = context.read<LibraryBloc>();
     final controller = TextEditingController();
+    final t = context.tokens;
     showDialog<void>(
       context: context,
-      builder: (dContext) => AlertDialog(
-        title: const Text('New Category'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            hintText: 'e.g. Favorites, Shonen, Webtoons',
-          ),
-          onSubmitted: (val) {
-            final name = val.trim();
-            if (name.isNotEmpty) {
-              Navigator.pop(dContext);
-              bloc.add(LibraryCategoryAdded(name));
-              if (moveSeries != null) {
-                bloc.add(LibraryMoveSeriesRequested(moveSeries, name));
-                _snack('Created "$name" and moved series');
-              } else {
-                _snack('Created category "$name"');
-              }
-            }
-          },
+      builder: (dContext) => Dialog(
+        backgroundColor: t.surfaceCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: t.border),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dContext),
-            child: const Text('Cancel'),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.create_new_folder_rounded, size: 22, color: t.accent),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'New Category',
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Create a shelf category to organize your manga collection.',
+                style: TextStyle(color: t.textSecondary, fontSize: 13.5),
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                style: TextStyle(color: t.textPrimary, fontSize: 15),
+                cursorColor: t.accent,
+                decoration: InputDecoration(
+                  hintText: 'e.g. Favorites, Shonen, Webtoons',
+                  hintStyle: TextStyle(color: t.textTertiary, fontSize: 14),
+                  filled: true,
+                  fillColor: t.surface,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: t.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: t.accent, width: 1.5),
+                  ),
+                ),
+                onSubmitted: (val) {
+                  final name = val.trim();
+                  if (name.isNotEmpty) {
+                    Navigator.pop(dContext);
+                    bloc.add(LibraryCategoryAdded(name));
+                    if (moveSeries != null) {
+                      bloc.add(LibraryMoveSeriesRequested(moveSeries, name));
+                      _snack('Created "$name" and moved series');
+                    } else {
+                      _snack('Created category "$name"');
+                    }
+                  }
+                },
+              ),
+              const SizedBox(height: 22),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dContext),
+                    style: TextButton.styleFrom(foregroundColor: t.textSecondary),
+                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () {
+                      final name = controller.text.trim();
+                      if (name.isNotEmpty) {
+                        Navigator.pop(dContext);
+                        bloc.add(LibraryCategoryAdded(name));
+                        if (moveSeries != null) {
+                          bloc.add(LibraryMoveSeriesRequested(moveSeries, name));
+                          _snack('Created "$name" and moved series');
+                        } else {
+                          _snack('Created category "$name"');
+                        }
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: const Color(0xFF04130C),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text('Create', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) {
-                Navigator.pop(dContext);
-                bloc.add(LibraryCategoryAdded(name));
-                if (moveSeries != null) {
-                  bloc.add(LibraryMoveSeriesRequested(moveSeries, name));
-                  _snack('Created "$name" and moved series');
-                } else {
-                  _snack('Created category "$name"');
-                }
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -408,62 +610,239 @@ class _LibraryPageState extends State<LibraryPage> {
   void _showRenameCategoryDialog(String oldName) {
     final bloc = context.read<LibraryBloc>();
     final controller = TextEditingController(text: oldName);
+    final t = context.tokens;
     showDialog<void>(
       context: context,
-      builder: (dContext) => AlertDialog(
-        title: const Text('Rename Category'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(hintText: 'New category name'),
+      builder: (dContext) => Dialog(
+        backgroundColor: t.surfaceCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: t.border),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dContext),
-            child: const Text('Cancel'),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.blueAccent.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.drive_file_rename_outline_rounded,
+                    size: 22, color: Colors.blueAccent),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Rename Category',
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Choose a new name for "$oldName".',
+                style: TextStyle(color: t.textSecondary, fontSize: 13.5),
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                style: TextStyle(color: t.textPrimary, fontSize: 15),
+                cursorColor: t.accent,
+                decoration: InputDecoration(
+                  hintText: 'Category name',
+                  hintStyle: TextStyle(color: t.textTertiary, fontSize: 14),
+                  filled: true,
+                  fillColor: t.surface,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: t.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: t.accent, width: 1.5),
+                  ),
+                ),
+                onSubmitted: (val) async {
+                  final newName = val.trim();
+                  if (newName.isNotEmpty && newName != oldName) {
+                    Navigator.pop(dContext);
+                    await CategoryStore.renameCategory(oldName, newName);
+                    final updated = await CategoryStore.getCategories();
+                    bloc.add(LibraryCategoriesLoaded(updated));
+                    if (bloc.state.categoryFilter == oldName) {
+                      bloc.add(LibraryCategoryFilterChanged(newName));
+                    }
+                    _snack('Renamed to "$newName"');
+                  }
+                },
+              ),
+              const SizedBox(height: 22),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dContext),
+                    style: TextButton.styleFrom(foregroundColor: t.textSecondary),
+                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () async {
+                      final newName = controller.text.trim();
+                      if (newName.isNotEmpty && newName != oldName) {
+                        Navigator.pop(dContext);
+                        await CategoryStore.renameCategory(oldName, newName);
+                        final updated = await CategoryStore.getCategories();
+                        bloc.add(LibraryCategoriesLoaded(updated));
+                        if (bloc.state.categoryFilter == oldName) {
+                          bloc.add(LibraryCategoryFilterChanged(newName));
+                        }
+                        _snack('Renamed to "$newName"');
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: const Color(0xFF04130C),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () async {
-              final newName = controller.text.trim();
-              if (newName.isNotEmpty && newName != oldName) {
-                Navigator.pop(dContext);
-                await CategoryStore.renameCategory(oldName, newName);
-                final updated = await CategoryStore.getCategories();
-                bloc.add(LibraryCategoriesLoaded(updated));
-                if (bloc.state.categoryFilter == oldName) {
-                  bloc.add(LibraryCategoryFilterChanged(newName));
-                }
-                _snack('Renamed to "$newName"');
-              }
-            },
-            child: const Text('Save'),
+        ),
+      ),
+    );
+  }
+
+  Future<bool?> _showConfirmDialog({
+    required String title,
+    required String content,
+    required String confirmLabel,
+    bool isDestructive = false,
+    IconData? icon,
+  }) {
+    final t = context.tokens;
+    return showDialog<bool>(
+      context: context,
+      builder: (dContext) => Dialog(
+        backgroundColor: t.surfaceCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: t.border),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (icon != null) ...[
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: (isDestructive ? Colors.redAccent : t.accent)
+                        .withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 24,
+                    color: isDestructive ? Colors.redAccent : t.accent,
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ],
+              Text(
+                title,
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                content,
+                style: TextStyle(
+                  color: t.textSecondary,
+                  fontSize: 14,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dContext, false),
+                    style: TextButton.styleFrom(
+                      foregroundColor: t.textSecondary,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dContext, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor:
+                          isDestructive ? Colors.redAccent : t.accent,
+                      foregroundColor:
+                          isDestructive ? Colors.white : const Color(0xFF04130C),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: Text(
+                      confirmLabel,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 
   Future<void> _deleteAccount() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete account?'),
-        content: const Text(
-          'This permanently deletes your shelf, reading progress and your '
-          'Manga Reader account. It cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final ok = await _showConfirmDialog(
+      title: 'Delete All Data?',
+      content:
+          'This will permanently delete your library, reading progress, and settings from this device and the cloud. This action cannot be undone.',
+      confirmLabel: 'Delete All Data',
+      isDestructive: true,
+      icon: Icons.warning_amber_rounded,
     );
     if (ok != true || !mounted) return;
     final repo = context.read<LibraryRepository>();
@@ -607,11 +986,6 @@ class _LibraryPageState extends State<LibraryPage> {
     return reading.isNotEmpty ? reading.first : all.first;
   }
 
-  void _checkUpdates() {
-    context.read<LibraryBloc>().add(const LibraryUpdatesRequested(force: true));
-    _snack('Checking for new chapters…');
-  }
-
   void _clearFilters() {
     _search.clear();
     _searchFocus.unfocus();
@@ -626,16 +1000,12 @@ class _LibraryPageState extends State<LibraryPage> {
   // Sections
   // ---------------------------------------------------------------------------
 
-  Widget _buildHeader(LibraryState state, int newCount) {
+  Widget _buildHeader(LibraryState state) {
     final t = context.tokens;
     final user = context.read<AuthBloc>().state.user;
     final headline = state.all.isEmpty
         ? 'Welcome to your shelf'
-        : newCount > 0
-            ? (newCount == 1
-                ? '1 new chapter waiting'
-                : '$newCount new chapters waiting')
-            : "What's next to read?";
+        : "What's next to read?";
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
@@ -672,26 +1042,6 @@ class _LibraryPageState extends State<LibraryPage> {
                 ),
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          _RoundButton(
-            icon: Icons.explore_outlined,
-            tooltip: 'Discover',
-            onTap: () async {
-              await DiscoverPage.open(context);
-              if (mounted) {
-                context
-                    .read<LibraryBloc>()
-                    .add(const LibraryUpdatesRequested());
-              }
-            },
-          ),
-          const SizedBox(width: 8),
-          _RoundButton(
-            icon: Icons.notifications_none_rounded,
-            tooltip: 'Check for new chapters',
-            badge: newCount,
-            onTap: _checkUpdates,
           ),
           const SizedBox(width: 8),
           _buildAccountMenu(user?.photoURL, user?.email),
@@ -928,48 +1278,6 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  Widget _buildNewStrip(List<Series> fresh) {
-    final t = context.tokens;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-          child: Row(
-            children: [
-              Text(
-                'New chapters',
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(width: 8),
-              _CountBadge(count: fresh.length, accent: true),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 156,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            itemCount: fresh.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) => _MiniCover(
-              series: fresh[i],
-              onTap: () => _open(fresh[i]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 22),
-      ],
-    );
-  }
-
   Widget _buildShelfTitle(LibraryState state) {
     final t = context.tokens;
     final filtering = state.query.trim().isNotEmpty || state.categoryFilter != null;
@@ -1025,7 +1333,6 @@ class _LibraryPageState extends State<LibraryPage> {
             final width = MediaQuery.sizeOf(context).width;
             final columns = (width / 170).floor().clamp(2, 6);
             final hasShelf = state.all.isNotEmpty;
-            final fresh = state.all.where((s) => s.hasNew).toList();
             final showHighlights = !state.loading &&
                 hasShelf &&
                 state.query.trim().isEmpty &&
@@ -1052,7 +1359,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 ),
                 slivers: [
                   SliverToBoxAdapter(
-                    child: _buildHeader(state, fresh.length),
+                    child: _buildHeader(state),
                   ),
                   if (showHighlights)
                     SliverToBoxAdapter(
@@ -1064,8 +1371,6 @@ class _LibraryPageState extends State<LibraryPage> {
                         ),
                       ),
                     ),
-                  if (showHighlights && fresh.isNotEmpty)
-                    SliverToBoxAdapter(child: _buildNewStrip(fresh)),
                   if (hasShelf)
                     SliverPersistentHeader(
                       pinned: true,
@@ -1107,8 +1412,8 @@ class _LibraryPageState extends State<LibraryPage> {
                         delegate: SliverChildBuilderDelegate(
                           (context, i) {
                             final s = state.visible[i];
-                            return _EntranceFade(
-                              key: ValueKey('fade_${s.id}'),
+                            return _AnimatedGridTile(
+                              key: ValueKey('tile_${s.id}'),
                               index: i,
                               child: SeriesCard(
                                 key: ValueKey(s.id),
@@ -1295,155 +1600,79 @@ class _ContinueHero extends StatelessWidget {
   }
 }
 
-class _MiniCover extends StatelessWidget {
-  const _MiniCover({required this.series, required this.onTap});
+class _SheetActionTile extends StatelessWidget {
+  const _SheetActionTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.destructive = false,
+  });
 
-  final Series series;
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
+  final bool destructive;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     return PressableScale(
-      onTap: onTap,
-      scaleDown: 0.95,
-      child: SizedBox(
-        width: 104,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: t.accent.withValues(alpha: 0.8), width: 1.4),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              SeriesCover(series: series, memCacheWidth: 280),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    stops: [0.0, 0.5, 1.0],
-                    colors: [
-                      Color(0xE6000000),
-                      Color(0x66000000),
-                      Color(0x00000000),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 6,
-                left: 6,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: t.accent,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'NEW',
-                    style: TextStyle(
-                      color: Color(0xFF04130C),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 8,
-                right: 8,
-                bottom: 8,
-                child: Text(
-                  series.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    height: 1.15,
-                  ),
-                ),
-              ),
-            ],
-          ),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: t.surfaceCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.border),
         ),
-      ),
-    );
-  }
-}
-
-/// Uniform circular header button with an optional count badge.
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.badge = 0,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  final int badge;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return Tooltip(
-      message: tooltip,
-      child: PressableScale(
-        onTap: onTap,
-        scaleDown: 0.9,
-        child: SizedBox(
-          width: 42,
-          height: 42,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: t.surface,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: t.border),
-                ),
-                child: Icon(icon, size: 21, color: t.textPrimary),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
               ),
-              if (badge > 0)
-                Positioned(
-                  top: -2,
-                  right: -2,
-                  child: Container(
-                    constraints:
-                        const BoxConstraints(minWidth: 18, minHeight: 18),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: t.accent,
-                      shape: badge > 9 ? BoxShape.rectangle : BoxShape.circle,
-                      borderRadius:
-                          badge > 9 ? BorderRadius.circular(9) : null,
-                      border: Border.all(color: t.bg, width: 2),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      badge > 99 ? '99+' : '$badge',
-                      style: const TextStyle(
-                        color: Color(0xFF04130C),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                      ),
+              child: Icon(icon, size: 20, color: iconColor),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: destructive ? Colors.redAccent : t.textPrimary,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-            ],
-          ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: t.textTertiary,
+            ),
+          ],
         ),
       ),
     );
@@ -1451,10 +1680,9 @@ class _RoundButton extends StatelessWidget {
 }
 
 class _CountBadge extends StatelessWidget {
-  const _CountBadge({required this.count, this.accent = false});
+  const _CountBadge({required this.count});
 
   final int count;
-  final bool accent;
 
   @override
   Widget build(BuildContext context) {
@@ -1462,13 +1690,13 @@ class _CountBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: accent ? t.accent.withValues(alpha: 0.16) : t.surfaceCard,
+        color: t.surfaceCard,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         '$count',
         style: TextStyle(
-          color: accent ? t.accent : t.textSecondary,
+          color: t.textSecondary,
           fontSize: 11.5,
           fontWeight: FontWeight.w800,
         ),
@@ -1539,24 +1767,35 @@ class _CategoryChip extends StatelessWidget {
   }
 }
 
-/// Fades + slides a grid tile in the first time it is built, with a small
-/// stagger so the shelf "settles" instead of popping in.
-class _EntranceFade extends StatelessWidget {
-  const _EntranceFade({super.key, required this.index, required this.child});
+/// Animated entry for grid tiles as the user scrolls or reveals the shelf:
+/// smooth scale + slide up + opacity with an index-staggered spring curve.
+class _AnimatedGridTile extends StatelessWidget {
+  const _AnimatedGridTile({
+    super.key,
+    required this.index,
+    required this.child,
+  });
 
   final int index;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final ms = 280 + (index % 8) * 55;
+    final delayMs = (index % 6) * 45;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: ms),
+      duration: Duration(milliseconds: 320 + delayMs),
       curve: Curves.easeOutCubic,
-      builder: (context, v, child) => Opacity(
-        opacity: v,
-        child: Transform.translate(offset: Offset(0, (1 - v) * 18), child: child),
+      builder: (context, v, animChild) => Opacity(
+        opacity: v.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(0, (1 - v) * 24),
+          child: Transform.scale(
+            scale: 0.90 + 0.10 * v,
+            alignment: Alignment.center,
+            child: animChild,
+          ),
+        ),
       ),
       child: child,
     );
@@ -1650,15 +1889,6 @@ class _EmptyState extends StatelessWidget {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(26),
               ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: () => DiscoverPage.open(context),
-            icon: Icon(Icons.explore_outlined, size: 18, color: t.accent),
-            label: Text(
-              'Or browse MangaDex',
-              style: TextStyle(color: t.accent, fontWeight: FontWeight.w700),
             ),
           ),
         ],
