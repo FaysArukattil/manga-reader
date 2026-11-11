@@ -198,8 +198,13 @@ class GenericSiteAdapter implements SiteAdapter {
     final catalogue = _extractChapterCatalogue(document, pageUri);
 
     // 7. Discover Next & Prev Chapter URLs
-    final nextUrl = _findNavigationLink(document, pageUri, isNext: true) ??
-        _findCatalogueNeighbor(catalogue, pageUri.toString(), isNext: true);
+    final isLatestInCatalogue =
+        isCatalogueLatest(catalogue, pageUri.toString());
+    final nextUrl = isLatestInCatalogue
+        ? null
+        : (_findNavigationLink(document, pageUri, isNext: true) ??
+            _findCatalogueNeighbor(catalogue, pageUri.toString(),
+                isNext: true));
     final prevUrl = _findNavigationLink(document, pageUri, isNext: false) ??
         _findCatalogueNeighbor(catalogue, pageUri.toString(), isNext: false);
 
@@ -472,7 +477,7 @@ class GenericSiteAdapter implements SiteAdapter {
 
     // 1. Check <select> elements (standard in 90% of manga reader pages)
     final selects = doc.querySelectorAll(
-      'select#select-chapter, select[name*="chapter"], select.chapter-select, select.c-select, select.single-chapter-select',
+      'select#select-chapter, select[name*="chapter"], select.chapter-select, select.c-select, select.single-chapter-select, .select-chapter select, .chapter-selection select',
     );
     for (final select in selects) {
       for (final opt in select.querySelectorAll('option')) {
@@ -514,6 +519,97 @@ class GenericSiteAdapter implements SiteAdapter {
     return list;
   }
 
+  static double? _parseChapterNum(String textOrUrl) {
+    final uri = Uri.tryParse(textOrUrl);
+    final target = (uri != null && uri.path.isNotEmpty) ? uri.path : textOrUrl;
+    final m = RegExp(
+      r'(?:chapter|chap|ch|episode|ep)[-_/.\s]?(\d+(?:[._-]\d+)?)',
+      caseSensitive: false,
+    ).allMatches(target);
+    if (m.isNotEmpty) {
+      final norm = m.last.group(1)!.replaceAll(RegExp(r'[_-]'), '.');
+      final val = double.tryParse(norm);
+      if (val != null) return val;
+    }
+    final m2 = RegExp(
+      r'(?:chapter|chap|ch|episode|ep|#)?\s*(\d+(?:\.\d+)?)',
+      caseSensitive: false,
+    ).firstMatch(textOrUrl);
+    if (m2 != null) {
+      return double.tryParse(m2.group(1)!);
+    }
+    return null;
+  }
+
+  static bool _isCatalogueDescending(List<ChapterRef> catalogue) {
+    if (catalogue.length < 2) return true;
+    double? firstNum;
+    double? lastNum;
+    for (int i = 0; i < catalogue.length; i++) {
+      firstNum = _parseChapterNum(catalogue[i].url) ??
+          _parseChapterNum(catalogue[i].label);
+      if (firstNum != null) break;
+    }
+    for (int i = catalogue.length - 1; i >= 0; i--) {
+      lastNum = _parseChapterNum(catalogue[i].url) ??
+          _parseChapterNum(catalogue[i].label);
+      if (lastNum != null) break;
+    }
+    if (firstNum != null && lastNum != null && firstNum != lastNum) {
+      return firstNum > lastNum;
+    }
+    return true; // Default to newest-first (industry standard)
+  }
+
+  static bool isCatalogueLatest(
+      List<ChapterRef> catalogue, String currentUrl) {
+    if (catalogue.isEmpty) return false;
+    final normCurrent = UrlTools.normalize(currentUrl);
+    final curUri = Uri.tryParse(currentUrl);
+
+    int idx = catalogue.indexWhere(
+      (c) => UrlTools.normalize(c.url) == normCurrent,
+    );
+    if (idx < 0 && curUri != null) {
+      idx = catalogue.indexWhere((c) {
+        final cUri = Uri.tryParse(c.url);
+        return cUri != null && cUri.path == curUri.path;
+      });
+    }
+    if (idx < 0) {
+      final curNum = _parseChapterNum(currentUrl);
+      if (curNum != null) {
+        idx = catalogue.indexWhere((c) {
+          final cNum =
+              _parseChapterNum(c.url) ?? _parseChapterNum(c.label);
+          return cNum == curNum;
+        });
+      }
+    }
+
+    final isDesc = _isCatalogueDescending(catalogue);
+    if (idx >= 0) {
+      return isDesc ? (idx == 0) : (idx == catalogue.length - 1);
+    }
+
+    // If current URL wasn't matched directly, check if chapter number is >= max in catalogue
+    final curNum = _parseChapterNum(currentUrl);
+    if (curNum != null) {
+      double? maxNum;
+      for (final c in catalogue) {
+        final n = _parseChapterNum(c.url) ?? _parseChapterNum(c.label);
+        if (n != null && (maxNum == null || n > maxNum)) {
+          maxNum = n;
+        }
+      }
+      if (maxNum != null && curNum >= maxNum) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   String? _findCatalogueNeighbor(
     List<ChapterRef> catalogue,
     String currentUrl, {
@@ -521,13 +617,35 @@ class GenericSiteAdapter implements SiteAdapter {
   }) {
     if (catalogue.length < 2) return null;
     final normCurrent = UrlTools.normalize(currentUrl);
-    final idx = catalogue.indexWhere(
+    int idx = catalogue.indexWhere(
       (c) => UrlTools.normalize(c.url) == normCurrent,
     );
+    if (idx < 0) {
+      final curUri = Uri.tryParse(currentUrl);
+      if (curUri != null) {
+        idx = catalogue.indexWhere((c) {
+          final cUri = Uri.tryParse(c.url);
+          return cUri != null && cUri.path == curUri.path;
+        });
+      }
+    }
+    if (idx < 0) {
+      final curNum = _parseChapterNum(currentUrl);
+      if (curNum != null) {
+        idx = catalogue.indexWhere((c) {
+          final cNum =
+              _parseChapterNum(c.url) ?? _parseChapterNum(c.label);
+          return cNum == curNum;
+        });
+      }
+    }
     if (idx < 0) return null;
 
-    // Check if catalogue is ordered newest-first or oldest-first
-    final targetIdx = isNext ? idx + 1 : idx - 1;
+    final isDesc = _isCatalogueDescending(catalogue);
+    final targetIdx = isDesc
+        ? (isNext ? idx - 1 : idx + 1)
+        : (isNext ? idx + 1 : idx - 1);
+
     if (targetIdx >= 0 && targetIdx < catalogue.length) {
       return catalogue[targetIdx].url;
     }
@@ -666,6 +784,19 @@ class GenericSiteAdapter implements SiteAdapter {
     Uri baseUri, {
     required bool isNext,
   }) {
+    bool isDisabled(dom.Element el) {
+      final cls = (el.attributes['class'] ?? '').toLowerCase();
+      final parentCls = (el.parent?.attributes['class'] ?? '').toLowerCase();
+      if (cls.contains('disabled') || parentCls.contains('disabled')) return true;
+      if (el.attributes['aria-disabled'] == 'true' ||
+          el.attributes['disabled'] != null) {
+        return true;
+      }
+      final href = (el.attributes['href'] ?? '').trim().toLowerCase();
+      if (href == '#' || href.startsWith('javascript:')) return true;
+      return false;
+    }
+
     // 0. Check ts_reader or JSON navigation parameters: prevUrl / nextUrl
     final navKey = isNext ? 'nextUrl' : 'prevUrl';
     final rawHtml = doc.outerHtml;
@@ -690,7 +821,7 @@ class GenericSiteAdapter implements SiteAdapter {
     // 1. Check <link rel="next|prev"> or <a rel="next|prev">
     final relEl = doc.querySelector('link[rel="$rel"]') ??
         doc.querySelector('a[rel="$rel"]');
-    if (relEl != null) {
+    if (relEl != null && !isDisabled(relEl)) {
       final href = relEl.attributes['href'];
       if (href != null && href.isNotEmpty) {
         return _resolveUrl(href, baseUri);
@@ -720,7 +851,7 @@ class GenericSiteAdapter implements SiteAdapter {
 
     for (final sel in classSelectors) {
       final el = doc.querySelector(sel);
-      if (el != null) {
+      if (el != null && !isDisabled(el)) {
         final href = el.attributes['href'];
         if (href != null && href.isNotEmpty) {
           final res = _resolveUrl(href, baseUri);
@@ -736,6 +867,7 @@ class GenericSiteAdapter implements SiteAdapter {
         : ['prev', 'previous', 'older', '<', '«', 'prev chapter'];
 
     for (final a in anchors) {
+      if (isDisabled(a)) continue;
       final text = a.text.trim().toLowerCase();
       for (final w in matchWords) {
         if (text == w || text.contains(w)) {

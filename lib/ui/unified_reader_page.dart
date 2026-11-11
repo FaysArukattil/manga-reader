@@ -1268,7 +1268,8 @@ class _PageImageState extends State<_PageImage> {
                         child: Center(
                           child: widget.item.allUrls.length <= 1
                               ? CachedNetworkImage(
-                                  key: ValueKey('${widget.item.pageKey}#$_retryNonce'),
+                                  key: ValueKey(
+                                      '${widget.item.pageKey}#$_retryNonce'),
                                   imageUrl: widget.item.url,
                                   cacheKey: widget.item.pageKey,
                                   cacheManager: PageCache.instance,
@@ -1302,12 +1303,17 @@ class _PageImageState extends State<_PageImage> {
                                     ),
                                   ),
                                   errorWidget: (_, url, error) {
-                                    CfDiag.log('image failed ${Uri.tryParse(url)?.host}: $error');
+                                    CfDiag.log(
+                                        'image failed ${Uri.tryParse(url)?.host}: $error');
                                     if (_autoRetries < 1) {
                                       _autoRetries++;
-                                      WidgetsBinding.instance.addPostFrameCallback((_) async {
-                                        await PageCache.instance.removeFile(widget.item.pageKey);
-                                        if (mounted) setState(() => _retryNonce++);
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) async {
+                                        await PageCache.instance
+                                            .removeFile(widget.item.pageKey);
+                                        if (mounted) {
+                                          setState(() => _retryNonce++);
+                                        }
                                       });
                                       return SizedBox(
                                         height: constraints.maxHeight,
@@ -1325,22 +1331,34 @@ class _PageImageState extends State<_PageImage> {
                                     }
                                     return Center(
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 32, vertical: 32),
                                         child: Column(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            const Icon(Icons.broken_image_rounded, color: Colors.white30, size: 36),
+                                            const Icon(
+                                                Icons.broken_image_rounded,
+                                                color: Colors.white30,
+                                                size: 36),
                                             const SizedBox(height: 8),
-                                            const Text("This page didn't load", style: TextStyle(color: Colors.white54, fontSize: 13)),
+                                            const Text("This page didn't load",
+                                                style: TextStyle(
+                                                    color: Colors.white54,
+                                                    fontSize: 13)),
                                             const SizedBox(height: 12),
                                             OutlinedButton(
                                               onPressed: () async {
-                                                await PageCache.instance.removeFile(widget.item.pageKey);
-                                                if (mounted) setState(() => _retryNonce++);
+                                                await PageCache.instance
+                                                    .removeFile(
+                                                        widget.item.pageKey);
+                                                if (mounted) {
+                                                  setState(() => _retryNonce++);
+                                                }
                                               },
                                               style: OutlinedButton.styleFrom(
                                                 foregroundColor: Colors.white70,
-                                                side: const BorderSide(color: Colors.white24),
+                                                side: const BorderSide(
+                                                    color: Colors.white24),
                                               ),
                                               child: const Text('Retry'),
                                             ),
@@ -1352,7 +1370,8 @@ class _PageImageState extends State<_PageImage> {
                                 )
                               : Column(
                                   mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                   children: [
                                     for (final sliceUrl in widget.item.allUrls)
                                       _PageSliceImage(
@@ -1776,8 +1795,8 @@ class _CaughtUpCard extends StatelessWidget {
               needsVerification
                   ? 'This site needs a quick one-time verification to open it.'
                   : (checking
-                      ? 'Checking for new chapters...'
-                      : "We'll keep an eye out for the next chapter."),
+                      ? 'Checking for newly released chapters...'
+                      : 'No new chapters available right now.'),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
@@ -1830,7 +1849,8 @@ class _NextChapterLoadingCard extends StatefulWidget {
   final bool vertical;
 
   @override
-  State<_NextChapterLoadingCard> createState() => _NextChapterLoadingCardState();
+  State<_NextChapterLoadingCard> createState() =>
+      _NextChapterLoadingCardState();
 }
 
 class _NextChapterLoadingCardState extends State<_NextChapterLoadingCard>

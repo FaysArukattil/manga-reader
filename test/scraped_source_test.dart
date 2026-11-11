@@ -115,5 +115,34 @@ void main() {
         equals('One Piece'),
       );
     });
+
+    test('a guessed next chapter that requires verification does NOT throw and is marked dead', () async {
+      final scrape = _FakeScrape((url, force) {
+        if (url == 'https://x.com/ch-93') {
+          return _chapter(url, next: 'https://x.com/ch-94', guessed: true);
+        }
+        if (url == 'https://x.com/ch-94') {
+          // CF challenge or 404 interstitial on the non-existent guessed chapter
+          return const ScrapedChapterResult(
+            chapterUrl: 'https://x.com/ch-94',
+            pages: [],
+            needsVerification: true,
+            verificationUrl: 'https://x.com/ch-94',
+          );
+        }
+        return ScrapedChapterResult(chapterUrl: url, pages: const []);
+      });
+      final source = ScrapedSource(scrapeService: scrape);
+
+      await source.loadChapter('https://x.com/ch-93');
+      expect(await source.getNextChapterId('https://x.com/ch-93'), equals('https://x.com/ch-94'));
+
+      // Trying the guessed chapter should NOT throw VerificationRequiredException
+      final pages = await source.loadChapter('https://x.com/ch-94');
+      expect(pages, isEmpty);
+
+      // Now ch-94 is marked dead, so next chapter ID becomes null (caught up!)
+      expect(await source.getNextChapterId('https://x.com/ch-93'), isNull);
+    });
   });
 }

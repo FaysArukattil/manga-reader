@@ -91,14 +91,21 @@ class ScrapeService {
     List<ChapterRef> chapters = const [],
   }) async {
     if (pages.length < 2) return;
+    final isLatestInCatalogue = chapters.isNotEmpty &&
+        GenericSiteAdapter.isCatalogueLatest(chapters, url);
+    final nextGuessed = !isLatestInCatalogue && nextUrl == null;
+    final nextChapterUrl = isLatestInCatalogue
+        ? null
+        : (nextUrl ?? UrlTools.stepChapter(url, 1));
+    final prevChapterUrl = prevUrl ?? UrlTools.stepChapter(url, -1);
     final result = ScrapedChapterResult(
       chapterUrl: url,
       pages: pages,
       title: title != null ? UrlTools.cleanTitle(title) : null,
       chapterLabel: UrlTools.chapterLabel(url),
-      nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
-      prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
-      nextGuessed: nextUrl == null,
+      nextChapterUrl: nextChapterUrl,
+      prevChapterUrl: prevChapterUrl,
+      nextGuessed: nextGuessed,
       isWebtoon: true,
       availableChapters: chapters,
     );
@@ -139,7 +146,14 @@ class ScrapeService {
           'server=${response.headers['server']}',
         );
 
-        if (CfSession.isChallengeResponse(
+        if (response.statusCode == 404) {
+          CfDiag.log('http 404 ${uri.host} -> chapter does not exist');
+          return ScrapedChapterResult(
+            chapterUrl: url,
+            pages: const [],
+            chapterLabel: UrlTools.chapterLabel(url),
+          );
+        } else if (CfSession.isChallengeResponse(
           response.statusCode,
           response.headers,
           response.body,
@@ -370,6 +384,14 @@ class ScrapeService {
       if (pages.length < 2) {
         try {
           final title = (await c.getTitle() ?? '').toLowerCase();
+          if (title.contains('404') ||
+              title.contains('not found') ||
+              title.contains('page not found') ||
+              title.contains("doesn't exist")) {
+            CfDiag.log('headless page is 404/not found: $url');
+            finish(ScrapedChapterResult(chapterUrl: url, pages: const []));
+            return;
+          }
           if (title.contains('moment') ||
               title.contains('cloudflare') ||
               title.contains('human') ||
@@ -433,9 +455,16 @@ class ScrapeService {
             pages: pages,
             title: finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
             chapterLabel: UrlTools.chapterLabel(url),
-            nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
+            nextChapterUrl: (availableChapters.isNotEmpty &&
+                    GenericSiteAdapter.isCatalogueLatest(
+                        availableChapters, url))
+                ? null
+                : (nextUrl ?? UrlTools.stepChapter(url, 1)),
             prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
-            nextGuessed: nextUrl == null,
+            nextGuessed: !(availableChapters.isNotEmpty &&
+                    GenericSiteAdapter.isCatalogueLatest(
+                        availableChapters, url)) &&
+                nextUrl == null,
             isWebtoon: pages.length >= 2,
             availableChapters: availableChapters,
             coverUrl: metaCover is String && metaCover.startsWith('http')
@@ -473,6 +502,14 @@ class ScrapeService {
           finish(ScrapedChapterResult(chapterUrl: url, pages: const []));
         }
       },
+      onReceivedHttpError: (controller, request, errorResponse) {
+        if (request.isForMainFrame == true &&
+            errorResponse.statusCode == 404 &&
+            !challengeSeen) {
+          CfDiag.log('headless HTTP 404 for $url');
+          finish(ScrapedChapterResult(chapterUrl: url, pages: const []));
+        }
+      },
     );
 
     await headless!.run();
@@ -490,14 +527,20 @@ class ScrapeService {
     });
 
     quietTimer = Timer(const Duration(seconds: 18), () {
-      if (!completer.isCompleted) finish(_needsVerification(url));
+      if (!completer.isCompleted) {
+        finish(challengeSeen
+            ? _needsVerification(url)
+            : ScrapedChapterResult(chapterUrl: url, pages: const []));
+      }
     });
 
     return completer.future.timeout(
       const Duration(seconds: 20),
       onTimeout: () {
         CfDiag.log('headless timeout challengeSeen=$challengeSeen $url');
-        final r = _needsVerification(url);
+        final r = challengeSeen
+            ? _needsVerification(url)
+            : ScrapedChapterResult(chapterUrl: url, pages: const []);
         finish(r);
         return r;
       },

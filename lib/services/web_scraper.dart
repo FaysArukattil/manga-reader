@@ -349,6 +349,16 @@ class WebScraper {
   static const String extractNavigationJs = r'''
 (function() {
   try {
+    function isDisabled(el) {
+      if (!el) return true;
+      if (el.classList.contains('disabled') ||
+          (el.parentElement && el.parentElement.classList.contains('disabled'))) return true;
+      if (el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled')) return true;
+      var h = (el.getAttribute('href') || '').trim().toLowerCase();
+      if (h === '#' || h.indexOf('javascript:') === 0) return true;
+      return false;
+    }
+
     var nextSelectors = [
       'a.next_page',
       'a.ch-next-btn',
@@ -375,7 +385,7 @@ class WebScraper {
 
     for (var i = 0; i < nextSelectors.length; i++) {
       var el = document.querySelector(nextSelectors[i]);
-      if (el && el.href && el.href.indexOf('http') === 0) {
+      if (el && el.href && el.href.indexOf('http') === 0 && !isDisabled(el)) {
         nextUrl = el.href;
         break;
       }
@@ -383,7 +393,7 @@ class WebScraper {
 
     for (var i = 0; i < prevSelectors.length; i++) {
       var el = document.querySelector(prevSelectors[i]);
-      if (el && el.href && el.href.indexOf('http') === 0) {
+      if (el && el.href && el.href.indexOf('http') === 0 && !isDisabled(el)) {
         prevUrl = el.href;
         break;
       }
@@ -393,8 +403,11 @@ class WebScraper {
     // (e.g. /title/slug/7301644-chapter-60 -> .../7301701-chapter-61): the
     // next URL can't be guessed, so find the real link by chapter number.
     function chNum(path) {
+      if (!path) return null;
       var m = path.match(/chapter[-_\/]?(\d+(?:[._-]\d+)?)/i);
-      return m ? parseFloat(m[1].replace(/[_-]/, '.')) : null;
+      if (m) return parseFloat(m[1].replace(/[_-]/, '.'));
+      var m2 = path.match(/(?:chapter|ch|ep|#)?\s*(\d+(?:\.\d+)?)/i);
+      return m2 ? parseFloat(m2[1]) : null;
     }
     function dirOf(path) { return path.replace(/\/[^\/]*\/?$/, ''); }
     try {
@@ -405,6 +418,7 @@ class WebScraper {
         var bestNext = null, bestNextN = Infinity, bestPrev = null, bestPrevN = -Infinity;
         var anchors = document.querySelectorAll('a[href]');
         for (var ai = 0; ai < anchors.length; ai++) {
+          if (isDisabled(anchors[ai])) continue;
           var u;
           try { u = new URL(anchors[ai].href, location.href); } catch (e) { continue; }
           if (u.origin !== location.origin || u.pathname === curPath) continue;
@@ -419,14 +433,42 @@ class WebScraper {
     } catch (e) {}
 
     var chapters = [];
-    var selects = document.querySelectorAll('select#select-chapter option, select[name*="chapter"] option, select.chapter-select option, select.c-select option');
+    var selects = document.querySelectorAll(
+      'select#select-chapter option, select[name*="chapter"] option, select.chapter-select option, select.c-select option, select.single-chapter-select option, .select-chapter select option, .chapter-selection select option'
+    );
     for (var j = 0; j < selects.length; j++) {
       var opt = selects[j];
-      var val = opt.value || opt.getAttribute('data-redirect') || '';
+      var val = opt.value || opt.getAttribute('data-redirect') || opt.getAttribute('data-url') || '';
       var lbl = opt.text ? opt.text.trim() : '';
       if (val && lbl) {
         if (val.indexOf('/') === 0) val = window.location.origin + val;
         chapters.push({ url: val, label: lbl });
+      }
+    }
+
+    if (chapters.length >= 2) {
+      var n0 = chNum(chapters[0].url) || chNum(chapters[0].label);
+      var nLast = chNum(chapters[chapters.length - 1].url) || chNum(chapters[chapters.length - 1].label);
+      var isDesc = (n0 !== null && nLast !== null) ? n0 > nLast : true;
+      var curPathNorm = location.pathname.replace(/\/+$/, '');
+      var curIdx = -1;
+      for (var k = 0; k < chapters.length; k++) {
+        var p = '';
+        try { p = new URL(chapters[k].url).pathname.replace(/\/+$/, ''); } catch(e) {}
+        if (p && p === curPathNorm) { curIdx = k; break; }
+      }
+      if (curIdx >= 0) {
+        var targetNextIdx = isDesc ? curIdx - 1 : curIdx + 1;
+        var targetPrevIdx = isDesc ? curIdx + 1 : curIdx - 1;
+        if (targetNextIdx >= 0 && targetNextIdx < chapters.length) {
+          if (!nextUrl) nextUrl = chapters[targetNextIdx].url;
+        } else {
+          // At the newest chapter in catalogue! There is NO next chapter.
+          nextUrl = null;
+        }
+        if (targetPrevIdx >= 0 && targetPrevIdx < chapters.length) {
+          if (!prevUrl) prevUrl = chapters[targetPrevIdx].url;
+        }
       }
     }
 

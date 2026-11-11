@@ -129,6 +129,7 @@ class ScrapedSource implements ChapterSource, RefreshableChapterSource {
   final Map<String, String?> _nextMap = {};
   final Map<String, String?> _prevMap = {};
   final Map<String, bool> _nextGuessed = {};
+  final Set<String> _guessedNextUrls = {};
   final Map<String, List<ChapterRef>> _catalogueMap = {};
 
   /// Chapter URLs that were tried and had no pages (the usual fate of a
@@ -145,6 +146,9 @@ class ScrapedSource implements ChapterSource, RefreshableChapterSource {
     _nextMap[id] = result.nextChapterUrl;
     _prevMap[id] = result.prevChapterUrl;
     _nextGuessed[id] = result.nextGuessed;
+    if (result.nextGuessed && result.nextChapterUrl != null) {
+      _guessedNextUrls.add(result.nextChapterUrl!);
+    }
     if (result.availableChapters.isNotEmpty) {
       _catalogueMap[id] = result.availableChapters;
     }
@@ -169,7 +173,16 @@ class ScrapedSource implements ChapterSource, RefreshableChapterSource {
     final result = await scrapeService.scrapeChapter(chapterIdOrUrl);
     _remember(chapterIdOrUrl, result);
 
+    final isGuessed = _guessedNextUrls.contains(chapterIdOrUrl) ||
+        _nextGuessed[chapterIdOrUrl] == true;
+
     if (result.needsVerification) {
+      // Guessed next chapters must never prompt verification because they
+      // frequently do not exist (404/interstitial). Mark as dead and return empty.
+      if (isGuessed) {
+        _dead[chapterIdOrUrl] = DateTime.now();
+        return const [];
+      }
       throw VerificationRequiredException(
         result.verificationUrl ?? chapterIdOrUrl,
       );

@@ -255,5 +255,38 @@ void main() {
       expect(result.nextChapterUrl, equals('https://en-thunderscans.com/the-second-eunuch-regains-his-manhood-chapter-104/'));
       expect(result.prevChapterUrl, equals('https://en-thunderscans.com/the-second-eunuch-regains-his-manhood-chapter-102/'));
     });
+
+    test('descending catalogue correctly marks latest chapter with null nextChapterUrl and ignores disabled links', () async {
+      const html = '''
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <div class="reading-content">
+            <img src="https://cdn.example.com/p1.jpg" />
+            <img src="https://cdn.example.com/p2.jpg" />
+          </div>
+          <select id="select-chapter">
+            <option value="https://example.com/ch-93/" selected>Chapter 93</option>
+            <option value="https://example.com/ch-92/">Chapter 92</option>
+            <option value="https://example.com/ch-91/">Chapter 91</option>
+          </select>
+          <div class="nav-links">
+            <a class="btn prev_page" href="https://example.com/ch-92/">Prev</a>
+            <a class="btn next_page disabled" href="#">Next</a>
+          </div>
+        </body>
+      </html>
+      ''';
+
+      final doc = dom.Document.html(html);
+      final uri = Uri.parse('https://example.com/ch-93/');
+
+      final result = await adapter.extract(doc, uri);
+
+      expect(result.pages.length, equals(2));
+      // Since ch-93 is the newest in the catalogue, nextChapterUrl must be NULL!
+      expect(result.nextChapterUrl, isNull);
+      expect(result.prevChapterUrl, equals('https://example.com/ch-92/'));
+    });
   });
 }
