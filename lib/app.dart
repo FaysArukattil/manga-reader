@@ -15,6 +15,7 @@ import 'services/thumbnail_store.dart';
 import 'theme/app_theme.dart';
 import 'ui/library_page.dart';
 import 'ui/login_page.dart';
+import 'ui/splash_page.dart';
 
 class ShelfmarkApp extends StatelessWidget {
   const ShelfmarkApp({
@@ -44,7 +45,7 @@ class ShelfmarkApp extends StatelessWidget {
         child: BlocProvider<AuthBloc>(
           create: (c) => AuthBloc(c.read<AuthRepository>()),
           child: MaterialApp(
-            title: 'Shelfmark',
+            title: 'Manga Reader',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
@@ -53,7 +54,7 @@ class ShelfmarkApp extends StatelessWidget {
             // (readers, sheets, dialogs) can read them.
             builder: (context, child) =>
                 _LibraryScope(child: child ?? const SizedBox.shrink()),
-            home: const _AuthGate(),
+            home: const SplashPage(),
           ),
         ),
       ),
@@ -61,8 +62,8 @@ class ShelfmarkApp extends StatelessWidget {
   }
 }
 
-class _AuthGate extends StatelessWidget {
-  const _AuthGate();
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
 
   @override
   Widget build(BuildContext context) {

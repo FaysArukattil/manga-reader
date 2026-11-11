@@ -46,6 +46,10 @@ class AuthSignInRequested extends AuthEvent {
   const AuthSignInRequested();
 }
 
+class AuthSignInGuestRequested extends AuthEvent {
+  const AuthSignInGuestRequested();
+}
+
 class AuthSignOutRequested extends AuthEvent {
   const AuthSignOutRequested();
 }
@@ -64,6 +68,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
     });
     on<AuthSignInRequested>(_onSignIn);
+    on<AuthSignInGuestRequested>(_onSignInGuest);
     on<AuthDeleteRequested>(_onDelete);
     on<AuthSignOutRequested>((e, emit) async {
       await _repo.signOut();
@@ -87,6 +92,25 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         state.copyWith(
           busy: false,
           error: 'Sign-in failed. Check your connection and try again.',
+        ),
+      );
+    }
+  }
+
+  Future<void> _onSignInGuest(
+    AuthSignInGuestRequested e,
+    Emitter<AuthState> emit,
+  ) async {
+    if (state.busy) return;
+    emit(state.copyWith(busy: true, clearError: true));
+    try {
+      await _repo.signInAnonymously();
+      emit(state.copyWith(busy: false));
+    } catch (_) {
+      emit(
+        state.copyWith(
+          busy: false,
+          error: 'Guest sign-in failed. Check connection.',
         ),
       );
     }

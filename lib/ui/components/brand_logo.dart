@@ -28,6 +28,11 @@ class BrandLogo extends StatelessWidget {
                   blurRadius: size * 0.35,
                   offset: Offset(0, size * 0.08),
                 ),
+                BoxShadow(
+                  color: const Color(0xFF00B4D8).withValues(alpha: 0.2),
+                  blurRadius: size * 0.2,
+                  offset: Offset(0, size * 0.04),
+                ),
               ]
             : null,
       ),
@@ -38,7 +43,7 @@ class BrandLogo extends StatelessWidget {
           width: size,
           height: size,
           fit: BoxFit.cover,
-          filterQuality: FilterQuality.medium,
+          filterQuality: FilterQuality.high,
         ),
       ),
     );

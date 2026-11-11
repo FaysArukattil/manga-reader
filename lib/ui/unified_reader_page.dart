@@ -14,8 +14,8 @@ import '../services/reader/chapter_source.dart';
 import '../services/reader/reader_audio.dart';
 import '../services/scrape/cf_session.dart';
 import '../services/scrape/scrape_service.dart';
-import 'components/brand_logo.dart';
 import 'components/physics_page_turn.dart';
+import 'components/reading_loader.dart';
 import 'cf_verification_sheet.dart';
 
 /// Pure content native book reader:
@@ -1325,76 +1325,7 @@ class _LoadingBookPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // Ambient soft backdrop
-        if (series.coverUrl != null && series.coverUrl!.isNotEmpty)
-          Positioned.fill(
-            child: Opacity(
-              opacity: 0.18,
-              child: CachedNetworkImage(
-                imageUrl: series.coverUrl!,
-                cacheKey: series.coverUrl!,
-                cacheManager: PageCache.instance,
-                httpHeaders: CfSession.imageHeaders(
-                  series.coverUrl!,
-                  series.url.isNotEmpty ? series.url : null,
-                ),
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => const SizedBox.shrink(),
-              ),
-            ),
-          ),
-        Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const BrandLogo(size: 72, withGlow: true),
-              const SizedBox(height: 20),
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF00B96B),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                series.title,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (series.chapter.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  series.chapter,
-                  style: const TextStyle(
-                    color: Color(0xFF00B96B),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 10),
-              const Text(
-                'Opening book...',
-                style: TextStyle(
-                  color: Colors.white54,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
+    return ReadingLoader(series: series);
   }
 }
 

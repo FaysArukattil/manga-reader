@@ -9,6 +9,10 @@ class CategoryStore {
     'Plan to Read',
     'Favorites',
     'Completed',
+    'Fantasy',
+    'Action',
+    'Webtoon',
+    'Thriller',
   ];
 
   static Future<List<String>> getCategories() async {

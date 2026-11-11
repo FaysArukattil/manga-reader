@@ -30,6 +30,10 @@ class AuthRepository {
     await _auth.signInWithCredential(credential);
   }
 
+  Future<void> signInAnonymously() async {
+    await _auth.signInAnonymously();
+  }
+
   /// Permanently deletes the Firebase account. Re-authenticates with Google
   /// if Firebase asks for a recent login.
   Future<void> deleteAccount() async {
