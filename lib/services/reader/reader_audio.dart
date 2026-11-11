@@ -21,10 +21,10 @@ class ReaderAudio {
     try {
       _flipPlayer = AudioPlayer()
         ..setReleaseMode(ReleaseMode.stop)
-        ..setVolume(0.70);
+        ..setVolume(0.18);
       _peelPlayer = AudioPlayer()
         ..setReleaseMode(ReleaseMode.stop)
-        ..setVolume(0.55);
+        ..setVolume(0.12);
 
       await _flipPlayer?.setSource(_flipSource);
       await _peelPlayer?.setSource(_peelSource);
@@ -40,7 +40,7 @@ class ReaderAudio {
   }) {
     if (hapticsEnabled) {
       try {
-        HapticFeedback.selectionClick();
+        HapticFeedback.lightImpact();
       } catch (_) {}
     }
 
@@ -50,11 +50,13 @@ class ReaderAudio {
       final rate = speed.clamp(0.75, 1.6);
       if (_flipPlayer == null || !_initialized) {
         init().then((_) {
+          _flipPlayer?.setVolume(0.18);
           _flipPlayer?.setPlaybackRate(rate);
           _flipPlayer?.play(_flipSource, mode: PlayerMode.lowLatency);
         });
         return;
       }
+      _flipPlayer?.setVolume(0.18);
       _flipPlayer?.setPlaybackRate(rate);
       _flipPlayer?.stop().then((_) {
         _flipPlayer?.play(_flipSource, mode: PlayerMode.lowLatency);
@@ -66,17 +68,26 @@ class ReaderAudio {
   void playPagePeel({
     double speed = 1.0,
     bool soundEnabled = true,
+    bool hapticsEnabled = true,
   }) {
+    if (hapticsEnabled) {
+      try {
+        HapticFeedback.selectionClick();
+      } catch (_) {}
+    }
+
     if (!soundEnabled) return;
     try {
       final rate = speed.clamp(0.7, 1.4);
       if (_peelPlayer == null || !_initialized) {
         init().then((_) {
+          _peelPlayer?.setVolume(0.12);
           _peelPlayer?.setPlaybackRate(rate);
           _peelPlayer?.play(_peelSource, mode: PlayerMode.lowLatency);
         });
         return;
       }
+      _peelPlayer?.setVolume(0.12);
       _peelPlayer?.setPlaybackRate(rate);
       _peelPlayer?.stop().then((_) {
         _peelPlayer?.play(_peelSource, mode: PlayerMode.lowLatency);

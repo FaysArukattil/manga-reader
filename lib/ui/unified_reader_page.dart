@@ -754,17 +754,27 @@ class _StreamPagerState extends State<_StreamPager> {
     }
   }
 
+  bool _isAnimatingPage = false;
   void _go(int delta) {
+    if (_isAnimatingPage) return;
     final cur = widget.controller.hasClients
         ? (widget.controller.page?.round() ?? widget.initialPage)
         : widget.initialPage;
     final target = cur + delta;
     if (target < 0 || target >= _count) return;
-    widget.controller.animateToPage(
+    _isAnimatingPage = true;
+    try {
+      HapticFeedback.lightImpact();
+    } catch (_) {}
+    widget.controller
+        .animateToPage(
       target,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
-    );
+    )
+        .then((_) {
+      _isAnimatingPage = false;
+    });
   }
 
   Widget _buildPageItem(BuildContext context, int i) {
@@ -779,7 +789,14 @@ class _StreamPagerState extends State<_StreamPager> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Positioned.fill(child: _PageImage(item: item)),
+        Positioned.fill(
+          child: _PageImage(
+            item: item,
+            isVertical: widget.vertical,
+            onNextPage: () => _go(1),
+            onPrevPage: () => _go(-1),
+          ),
+        ),
         // Barely visible chapter seam marker
         if (isFirstInChapter)
           Positioned(
@@ -976,9 +993,17 @@ class _AnimatedPage extends StatelessWidget {
 // ------------------------------------------------------------- page image
 
 class _PageImage extends StatefulWidget {
-  const _PageImage({required this.item});
+  const _PageImage({
+    required this.item,
+    this.isVertical = false,
+    this.onNextPage,
+    this.onPrevPage,
+  });
 
   final ReaderPageItem item;
+  final bool isVertical;
+  final VoidCallback? onNextPage;
+  final VoidCallback? onPrevPage;
 
   @override
   State<_PageImage> createState() => _PageImageState();
@@ -986,6 +1011,8 @@ class _PageImage extends StatefulWidget {
 
 class _PageImageState extends State<_PageImage> {
   final ScrollController _scrollController = ScrollController();
+  double _dragStartY = 0;
+  DateTime _dragStartTime = DateTime.now();
 
   @override
   void dispose() {
@@ -1011,23 +1038,55 @@ class _PageImageState extends State<_PageImage> {
         imageBuilder: (context, imageProvider) {
           return LayoutBuilder(
             builder: (context, constraints) {
-              return InteractiveViewer(
-                minScale: 1.0,
-                maxScale: 3.5,
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  physics: const ClampingScrollPhysics(),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minWidth: constraints.maxWidth,
-                      minHeight: constraints.maxHeight,
-                    ),
-                    child: Center(
-                      child: Image(
-                        image: imageProvider,
-                        width: constraints.maxWidth,
-                        fit: BoxFit.fitWidth,
-                        filterQuality: FilterQuality.medium,
+              return Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (e) {
+                  _dragStartY = e.position.dy;
+                  _dragStartTime = DateTime.now();
+                },
+                onPointerUp: (e) {
+                  if (!widget.isVertical) return;
+                  final dy = e.position.dy - _dragStartY;
+                  final dt = math.max(
+                      1, DateTime.now().difference(_dragStartTime).inMilliseconds);
+                  final vy = (dy / dt) * 1000.0;
+
+                  final hasScroll = _scrollController.hasClients &&
+                      _scrollController.position.maxScrollExtent > 30;
+                  final atBottom = !hasScroll ||
+                      (_scrollController.hasClients &&
+                          _scrollController.offset >=
+                              _scrollController.position.maxScrollExtent - 20);
+                  final atTop = !hasScroll ||
+                      (_scrollController.hasClients &&
+                          _scrollController.offset <= 20);
+
+                  if ((dy < -40 || vy < -200) && atBottom) {
+                    widget.onNextPage?.call();
+                  } else if ((dy > 40 || vy > 200) && atTop) {
+                    widget.onPrevPage?.call();
+                  }
+                },
+                child: InteractiveViewer(
+                  minScale: 1.0,
+                  maxScale: 3.5,
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    physics: widget.isVertical
+                        ? const BouncingScrollPhysics()
+                        : const ClampingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: constraints.maxWidth,
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: Image(
+                          image: imageProvider,
+                          width: constraints.maxWidth,
+                          fit: BoxFit.fitWidth,
+                          filterQuality: FilterQuality.medium,
+                        ),
                       ),
                     ),
                   ),
@@ -1202,14 +1261,16 @@ class _VerificationRequiredView extends StatefulWidget {
 }
 
 class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
+  static final Set<String> _autoOpenedUrls = {};
   bool _modalOpened = false;
 
   @override
   void initState() {
     super.initState();
-    // Auto-open the verification modal sheet for immediate resolution
+    // Auto-open only once per URL to prevent infinite popup loops
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_modalOpened) {
+      if (mounted && !_modalOpened && !_autoOpenedUrls.contains(widget.url)) {
+        _autoOpenedUrls.add(widget.url);
         _openModal();
       }
     });
@@ -1314,23 +1375,53 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
   InAppWebViewController? _webViewController;
   double _progress = 0;
   bool _verifiedHandled = false;
+  bool _challengeSeen = false;
 
-  void _checkTitleForBypass(String? title) {
-    if (_verifiedHandled || title == null) return;
-    final lower = title.toLowerCase();
-    final isChallenge = lower.contains('just a moment') ||
-        lower.contains('turnstile') ||
-        lower.contains('cloudflare') ||
-        lower.contains('security check') ||
-        lower.contains('verifying');
-    if (!isChallenge && title.trim().isNotEmpty) {
-      _verifiedHandled = true;
-      Future.delayed(const Duration(milliseconds: 600), () {
+  Future<void> _checkIfSolved() async {
+    if (_verifiedHandled || _webViewController == null) return;
+
+    try {
+      final title = await _webViewController!.getTitle() ?? '';
+      final lower = title.toLowerCase();
+      final isChallengeTitle = lower.contains('just a moment') ||
+          lower.contains('turnstile') ||
+          lower.contains('cloudflare') ||
+          lower.contains('security check') ||
+          lower.contains('attention required') ||
+          lower.contains('verify you are human');
+
+      final isChallengeDom = await _webViewController!.evaluateJavascript(
+        source:
+            '(function(){ return document.querySelector("script[src*=\'challenge-platform\'], #challenge-stage, #challenge-error-text") !== null || window._cf_chl_opt !== undefined; })()',
+      );
+
+      if (isChallengeTitle || isChallengeDom == true) {
+        _challengeSeen = true;
+      }
+
+      // Check cookies for cf_clearance
+      final cookies = await CookieManager.instance()
+          .getCookies(url: WebUri(widget.url));
+      final hasClearance = cookies.any((c) => c.name == 'cf_clearance');
+
+      // The challenge is ONLY solved if:
+      // 1. We actually have the cf_clearance cookie, OR
+      // 2. We saw the challenge (_challengeSeen == true) and now the title is a real manga title.
+      final isRealTitle = title.trim().isNotEmpty &&
+          !isChallengeTitle &&
+          title.length > 4 &&
+          !title.contains('403') &&
+          !title.contains('503') &&
+          !title.contains('about:blank');
+
+      if ((hasClearance || (_challengeSeen && isRealTitle)) && !_verifiedHandled) {
+        _verifiedHandled = true;
+        await Future.delayed(const Duration(milliseconds: 600));
         if (mounted && Navigator.canPop(context)) {
           Navigator.pop(context, true);
         }
-      });
-    }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -1445,11 +1536,11 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
               onWebViewCreated: (c) => _webViewController = c,
               onProgressChanged: (_, p) {
                 if (mounted) setState(() => _progress = p / 100);
+                _checkIfSolved();
               },
-              onTitleChanged: (_, title) => _checkTitleForBypass(title),
+              onTitleChanged: (_, title) => _checkIfSolved(),
               onLoadStop: (controller, uri) async {
-                final title = await controller.getTitle();
-                _checkTitleForBypass(title);
+                await _checkIfSolved();
               },
             ),
           ),

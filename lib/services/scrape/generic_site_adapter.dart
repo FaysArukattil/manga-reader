@@ -69,11 +69,15 @@ class GenericSiteAdapter implements SiteAdapter {
     // 0. Detect Cloudflare / Security verification challenge
     final pageTitle = document.querySelector('title')?.text.trim() ?? '';
     final bodyText = document.body?.text ?? '';
+    final html = document.outerHtml;
     if (pageTitle.contains('Just a moment...') ||
         pageTitle.contains('Verify you are human') ||
         pageTitle.contains('Attention Required! | Cloudflare') ||
         bodyText.contains('challenges.cloudflare.com') ||
-        bodyText.contains('cf-turnstile')) {
+        bodyText.contains('cf-turnstile') ||
+        html.contains('_cf_chl_opt') ||
+        html.contains('challenges.cloudflare.com') ||
+        html.contains('challenge-platform')) {
       return ScrapedChapterResult(
         chapterUrl: pageUri.toString(),
         pages: const [],

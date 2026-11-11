@@ -44,24 +44,34 @@ class ScrapeService {
 
     // ------------------------------------------------------------- 1. Fast Path
     try {
+      final headers = <String, String>{
+        'User-Agent': mobileUserAgent,
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': url,
+      };
+
+      try {
+        final cookies =
+            await CookieManager.instance().getCookies(url: WebUri(url));
+        if (cookies.isNotEmpty) {
+          headers['Cookie'] =
+              cookies.map((c) => '${c.name}=${c.value}').join('; ');
+        }
+      } catch (_) {}
+
       final response = await _client.get(
         uri,
-        headers: {
-          'User-Agent': mobileUserAgent,
-          'Accept':
-              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': url,
-        },
-      ).timeout(const Duration(seconds: 8));
+        headers: headers,
+      ).timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final doc = dom.Document.html(response.body);
         final result = await adapter.extract(doc, uri);
         if (result.needsVerification) {
-          return result;
-        }
-        if (result.pages.length >= 2) {
+          // If adapter explicitly detects verification challenge even on 200, let headless try first
+        } else if (result.pages.length >= 2) {
           // Fast path succeeded!
           return result;
         }
@@ -165,6 +175,34 @@ class ScrapeService {
       initialSettings: settings,
       onLoadStop: (controller, loadedUrl) async {
         try {
+          final pageTitle = await controller.getTitle() ?? '';
+          final lowerTitle = pageTitle.toLowerCase();
+          final isChallengeTitle = lowerTitle.contains('just a moment') ||
+              lowerTitle.contains('turnstile') ||
+              lowerTitle.contains('cloudflare') ||
+              lowerTitle.contains('security check') ||
+              lowerTitle.contains('attention required') ||
+              lowerTitle.contains('verify you are human');
+
+          final isChallengeContent = await controller.evaluateJavascript(
+            source:
+                '(function(){ return document.querySelector("script[src*=\'challenge-platform\'], #challenge-stage, #challenge-error-text") !== null || window._cf_chl_opt !== undefined; })()',
+          );
+
+          if (isChallengeTitle || isChallengeContent == true) {
+            if (!completer.isCompleted) {
+              completer.complete(
+                ScrapedChapterResult(
+                  chapterUrl: url,
+                  pages: const [],
+                  needsVerification: true,
+                  verificationUrl: url,
+                ),
+              );
+            }
+            return;
+          }
+
           // 1. Strip ads & popups
           await controller.evaluateJavascript(source: WebScraper.stripAdsJs);
 
@@ -182,7 +220,7 @@ class ScrapeService {
           final nav = await controller.evaluateJavascript(
             source: WebScraper.extractNavigationJs,
           );
-          final pageTitle = await controller.getTitle();
+          final finalTitle = await controller.getTitle();
 
           final pages = <String>[];
           if (res is List) {
@@ -190,6 +228,24 @@ class ScrapeService {
               if (p != null && p.toString().isNotEmpty) {
                 pages.add(p.toString());
               }
+            }
+          }
+
+          if (pages.isEmpty) {
+            final checkChallenge = await controller.evaluateJavascript(
+              source:
+                  '(function(){ return document.body ? (document.body.innerText.indexOf("Verify you are human") !== -1 || document.body.innerText.indexOf("Cloudflare") !== -1 || !!window._cf_chl_opt) : false; })()',
+            );
+            if (checkChallenge == true && !completer.isCompleted) {
+              completer.complete(
+                ScrapedChapterResult(
+                  chapterUrl: url,
+                  pages: const [],
+                  needsVerification: true,
+                  verificationUrl: url,
+                ),
+              );
+              return;
             }
           }
 
@@ -221,7 +277,7 @@ class ScrapeService {
                 chapterUrl: url,
                 pages: pages,
                 title:
-                    pageTitle != null ? UrlTools.cleanTitle(pageTitle) : null,
+                    finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
                 chapterLabel: UrlTools.chapterLabel(url),
                 nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
                 prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
@@ -238,6 +294,29 @@ class ScrapeService {
           }
         } finally {
           headless?.dispose();
+        }
+      },
+      onReceivedHttpError: (controller, request, errorResponse) async {
+        if (request.isForMainFrame == true &&
+            (errorResponse.statusCode == 403 ||
+                errorResponse.statusCode == 503)) {
+          final title = (await controller.getTitle() ?? '').toLowerCase();
+          if (title.contains('just a moment') ||
+              title.contains('cloudflare') ||
+              title.contains('verify') ||
+              title.contains('attention')) {
+            if (!completer.isCompleted) {
+              completer.complete(
+                ScrapedChapterResult(
+                  chapterUrl: url,
+                  pages: const [],
+                  needsVerification: true,
+                  verificationUrl: url,
+                ),
+              );
+              headless?.dispose();
+            }
+          }
         }
       },
       onReceivedError: (controller, request, error) {
