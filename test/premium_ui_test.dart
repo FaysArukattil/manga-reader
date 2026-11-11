@@ -30,7 +30,7 @@ void main() {
     expect(find.text('Bypassing bot security'), findsOneWidget);
   });
 
-  testWidgets('OnboardingPage renders floating cover showcase and CTA button',
+  testWidgets('OnboardingPage renders interactive anime showcase and pull meter',
       (WidgetTester tester) async {
     await tester.pumpWidget(
       const MaterialApp(
@@ -40,8 +40,9 @@ void main() {
       ),
     );
 
-    expect(find.text("Discover Stories\nYou'll Love"), findsOneWidget);
-    expect(find.text("Let's get started"), findsOneWidget);
+    expect(find.text('ALL YOUR MANGA. ONE APP.'), findsOneWidget);
+    expect(find.text('Every series you love.\nOne app.'), findsOneWidget);
+    expect(find.text('Skip'), findsOneWidget);
   });
 }
 

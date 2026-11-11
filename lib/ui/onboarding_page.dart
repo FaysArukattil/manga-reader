@@ -496,7 +496,7 @@ class _OnboardingPageState extends State<OnboardingPage>
             ? 'RELEASE TO START!'
             : p > 0.05
                 ? 'KEEP STRETCHING...'
-                : 'PULL LUFFY TO GET STARTED';
+                : "PULL LUFFY TO GET STARTED";
         final active = p > 0.05;
         return Container(
           height: 56,
@@ -788,10 +788,15 @@ class _RubberLuffyPainter extends CustomPainter {
   }();
 
   /// Image is fitted to the bottom-center of the available area.
+  /// Tall full-body art: show head -> shorts and fade the legs out, so
+  /// Luffy is big on screen. Square-ish busts are shown whole.
+  static double cropOf(ui.Image img) =>
+      img.height / img.width > 1.3 ? 0.72 : 1.0;
+
   static Rect imageRect(Size size, ui.Image img) {
     final iw = img.width.toDouble();
-    final ih = img.height.toDouble();
-    final s = math.min(size.width * 1.05 / iw, size.height / ih);
+    final ih = img.height.toDouble() * cropOf(img);
+    final s = math.min(size.width * 0.98 / iw, size.height / ih);
     final w = iw * s;
     final h = ih * s;
     return Rect.fromLTWH((size.width - w) / 2, size.height - h, w, h);
@@ -800,6 +805,7 @@ class _RubberLuffyPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = imageRect(size, image);
+    final crop = cropOf(image);
     final iw = image.width.toDouble();
     final ih = image.height.toDouble();
 
@@ -808,7 +814,7 @@ class _RubberLuffyPainter extends CustomPainter {
     final pdir = pd > 0.5 ? p / pd : Offset.zero;
     final pn = Offset(-pdir.dy, pdir.dx);
     final g = grab();
-    final r = rect.shortestSide * 0.42;
+    final r = rect.shortestSide * (crop < 1 ? 0.32 : 0.42);
     final r2 = r * r;
 
     final speed = spring.dragging ? 0.0 : spring.vel.distance;
@@ -860,7 +866,7 @@ class _RubberLuffyPainter extends CustomPainter {
         pos[k] = bx + ox;
         pos[k + 1] = by + oy;
         tex[k] = u * iw;
-        tex[k + 1] = v * ih;
+        tex[k + 1] = v * ih * crop;
         k += 2;
       }
     }
@@ -878,6 +884,9 @@ class _RubberLuffyPainter extends CustomPainter {
       textureCoordinates: tex,
       indices: _indices,
     );
+    final layer =
+        Rect.fromLTWH(-100, -100, size.width + 200, size.height + 200);
+    if (crop < 1) canvas.saveLayer(layer, Paint());
     canvas.drawVertices(
       vertices,
       BlendMode.srcOver,
@@ -885,12 +894,30 @@ class _RubberLuffyPainter extends CustomPainter {
         ..shader = shader
         ..isAntiAlias = true,
     );
+    if (crop < 1) {
+      // Fade the cropped legs into the background
+      canvas.drawRect(
+        layer,
+        Paint()
+          ..blendMode = BlendMode.dstIn
+          ..shader = ui.Gradient.linear(
+            Offset(0, rect.bottom - rect.height * 0.24),
+            Offset(0, rect.bottom),
+            const [Color(0xFFFFFFFF), Color(0x00FFFFFF)],
+          ),
+      );
+      canvas.restore();
+    }
 
     // Idle hint: pulsing ring on the cheek, nudging toward a pull direction
     if (showHint() && spring.atRest) {
-      final base = rect.topLeft + Offset(rect.width * 0.76, rect.height * 0.60);
+      // Full-body art: invite the user to grab the outstretched hand
+      final base = crop < 1
+          ? rect.topLeft + Offset(rect.width * 0.29, rect.height * 0.30)
+          : rect.topLeft + Offset(rect.width * 0.76, rect.height * 0.60);
       final pv = pulse.value;
-      final c = base + Offset(pv * 18, pv * 10);
+      final c = base +
+          (crop < 1 ? Offset(-pv * 16, pv * 10) : Offset(pv * 18, pv * 10));
       canvas.drawCircle(
         c,
         16 + pv * 6,
