@@ -34,33 +34,34 @@ class GenericSiteAdapter implements SiteAdapter {
     '.scan-page',
   ];
 
-  static const List<String> _junkKeywords = [
-    'avatar',
-    'logo',
-    'banner',
-    'icon',
-    'button',
-    'badge',
-    'discord',
-    'telegram',
-    'facebook',
-    'twitter',
-    'patreon',
-    'donate',
-    'loading',
-    'spinner',
-    'placeholder',
-    'ads',
-    'advertisement',
-    'widget',
-    'thumb',
-    'cover',
-    'header',
-    'footer',
-    'rating',
-    'star',
-    'comment',
-  ];
+  /// Whole-token matches only. Substring matching used to reject any URL that
+  /// merely contained "ads" (every `/uploads/` path!), "star" (`/start/`),
+  /// "icon", "cover" inside longer words, etc.
+  static const Set<String> _junkTokens = {
+    'avatar', 'avatars', 'logo', 'logos', 'banner', 'banners', 'icon', 'icons',
+    'button', 'badge', 'badges', 'discord', 'telegram', 'facebook', 'twitter',
+    'patreon', 'donate', 'loading', 'spinner', 'placeholder', 'ads', 'ad',
+    'advert', 'advertisement', 'widget', 'header', 'footer', 'rating', 'emoji',
+    'sprite', 'favicon', 'thumb', 'thumbs', 'thumbnail', 'thumbnails', 'cover',
+  };
+
+  static const Set<String> _junkCoverTokens = {
+    'avatar', 'avatars', 'logo', 'logos', 'banner', 'banners', 'icon', 'icons',
+    'button', 'spinner', 'placeholder', 'ads', 'ad', 'advert', 'advertisement',
+    'rating', 'emoji', 'sprite', 'favicon',
+  };
+
+  static bool _hasJunkToken(String url, Set<String> tokens) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return true;
+    final parts = ('${uri.host}${uri.path}')
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'));
+    for (final t in parts) {
+      if (tokens.contains(t)) return true;
+    }
+    return false;
+  }
 
   @override
   Future<ScrapedChapterResult> extract(
@@ -277,22 +278,7 @@ class GenericSiteAdapter implements SiteAdapter {
     for (final ad in blockedDomains) {
       if (lower.contains(ad)) return true;
     }
-    for (final k in [
-      'avatar',
-      'logo',
-      'banner',
-      'icon',
-      'button',
-      'spinner',
-      'placeholder',
-      'ads',
-      'advertisement',
-      'rating',
-      'star',
-    ]) {
-      if (lower.contains(k)) return true;
-    }
-    return false;
+    return _hasJunkToken(url, _junkCoverTokens);
   }
 
   String? _findStartReadingLink(dom.Document doc, Uri baseUri) {
@@ -484,10 +470,7 @@ class GenericSiteAdapter implements SiteAdapter {
     for (final ad in blockedDomains) {
       if (lower.contains(ad)) return true;
     }
-    for (final k in _junkKeywords) {
-      if (lower.contains(k)) return true;
-    }
-    return false;
+    return _hasJunkToken(url, _junkTokens);
   }
 
   String? _resolveUrl(String raw, Uri base) {
@@ -500,13 +483,37 @@ class GenericSiteAdapter implements SiteAdapter {
     }
     final parsed = Uri.tryParse(raw);
     if (parsed == null) return null;
+    String? out;
     if (parsed.hasScheme) {
       if (parsed.scheme == 'http' || parsed.scheme == 'https') {
-        return parsed.toString();
+        out = parsed.toString();
+      } else {
+        return null;
       }
-      return null;
+    } else {
+      out = base.resolveUri(parsed).toString();
     }
-    return base.resolveUri(parsed).toString();
+    return _unwrapNextImage(out, base);
+  }
+
+  /// Next.js serves `/_next/image?url=%2Fuploads%2Fp.webp&w=640&q=75`; the
+  /// encoded `url` is the original, full-resolution file.
+  String _unwrapNextImage(String url, Uri base) {
+    final u = Uri.tryParse(url);
+    if (u == null) return url;
+    if (u.path.endsWith('/_next/image') || u.path.endsWith('/_next/image/')) {
+      final inner = u.queryParameters['url'];
+      if (inner != null && inner.isNotEmpty) {
+        final innerUri = Uri.tryParse(inner);
+        if (innerUri != null) {
+          final abs = innerUri.hasScheme ? innerUri : u.resolveUri(innerUri);
+          if (abs.scheme == 'http' || abs.scheme == 'https') {
+            return abs.toString();
+          }
+        }
+      }
+    }
+    return url;
   }
 
   bool _isJunk(String url, dom.Element img) {
@@ -517,9 +524,7 @@ class GenericSiteAdapter implements SiteAdapter {
       if (lower.contains(ad)) return true;
     }
 
-    for (final k in _junkKeywords) {
-      if (lower.contains(k)) return true;
-    }
+    if (_hasJunkToken(url, _junkTokens)) return true;
 
     // Filter out thumbnail/avatar/widget classes
     final cls = (img.attributes['class'] ?? '').toLowerCase();

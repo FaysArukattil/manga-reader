@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' show Size;
 
@@ -43,11 +44,40 @@ class CfWebFetcher {
   }
 
   /// Returns the file bytes, or null if the WebView couldn't get it either.
-  Future<WebFetchResult?> fetch(String url) async {
+  ///
+  /// When the image lives on a different host than the page that embeds it
+  /// (comix.to -> rotating `lov.*.site` CDNs) and that CDN checks Referer /
+  /// Origin, the request must come FROM the embedding site's origin. So we
+  /// first fetch from a session on the referer's origin (credentials omitted,
+  /// plain CORS), and only then from the image's own origin.
+  Future<WebFetchResult?> fetch(String url, {String? referer}) async {
     final uri = Uri.tryParse(url);
     if (uri == null || uri.host.isEmpty) return null;
-    final origin = '${uri.scheme}://${uri.host}';
+    final imgOrigin = '${uri.scheme}://${uri.host}';
 
+    final refUri = referer == null ? null : Uri.tryParse(referer);
+    final refOrigin = (refUri != null && refUri.host.isNotEmpty)
+        ? '${refUri.scheme}://${refUri.host}'
+        : null;
+
+    if (refOrigin != null && refOrigin != imgOrigin) {
+      final viaReferer = await _fetchVia(
+        refOrigin,
+        url,
+        credentials: 'omit',
+        crossOrigin: true,
+      );
+      if (viaReferer != null) return viaReferer;
+    }
+    return _fetchVia(imgOrigin, url, credentials: 'include');
+  }
+
+  Future<WebFetchResult?> _fetchVia(
+    String origin,
+    String url, {
+    required String credentials,
+    bool crossOrigin = false,
+  }) async {
     await _acquire();
     try {
       final session = await (_sessions[origin] ??= _open(origin));
@@ -59,7 +89,7 @@ class CfWebFetcher {
 
       final res = await session.controller.callAsyncJavaScript(
         functionBody: _fetchJs,
-        arguments: {'url': url},
+        arguments: {'url': url, 'cred': credentials},
       );
       final v = res?.value;
       if (v is! Map) {
@@ -68,9 +98,12 @@ class CfWebFetcher {
       }
       final status = (v['status'] as num?)?.toInt() ?? 0;
       if (status != 200 || v['b64'] == null) {
-        CfDiag.log('webfetch status=$status $url');
-        // Session may have a stale clearance/challenge: rebuild next time.
-        if (status == 403 || status == 429 || status == 503) {
+        CfDiag.log(
+          'webfetch(${crossOrigin ? 'via ${Uri.parse(origin).host}' : 'same-origin'}) '
+          'status=$status ${v['err'] ?? ''} $url',
+        );
+        // A stale clearance/challenge on the session's own origin: rebuild.
+        if (!crossOrigin && (status == 403 || status == 429 || status == 503)) {
           _sessions.remove(origin);
           await session.dispose();
         }
@@ -88,17 +121,21 @@ class CfWebFetcher {
   }
 
   static const String _fetchJs = r'''
-const resp = await fetch(url, {credentials: 'include', cache: 'no-store'});
-if (!resp.ok) { return {status: resp.status}; }
-const type = resp.headers.get('content-type') || '';
-if (type.indexOf('text/html') !== -1) { return {status: 499, type: type}; }
-const buf = new Uint8Array(await resp.arrayBuffer());
-let bin = '';
-const CH = 0x8000;
-for (let i = 0; i < buf.length; i += CH) {
-  bin += String.fromCharCode.apply(null, buf.subarray(i, i + CH));
+try {
+  const resp = await fetch(url, {credentials: cred, cache: 'no-store', mode: 'cors'});
+  if (!resp.ok) { return {status: resp.status}; }
+  const type = resp.headers.get('content-type') || '';
+  if (type.indexOf('text/html') !== -1) { return {status: 499, type: type}; }
+  const buf = new Uint8Array(await resp.arrayBuffer());
+  let bin = '';
+  const CH = 0x8000;
+  for (let i = 0; i < buf.length; i += CH) {
+    bin += String.fromCharCode.apply(null, buf.subarray(i, i + CH));
+  }
+  return {status: 200, type: type, b64: btoa(bin)};
+} catch (e) {
+  return {status: 0, err: String(e)};
 }
-return {status: 200, type: type, b64: btoa(bin)};
 ''';
 
   /// Loads a tiny same-origin page so fetch() runs with that origin's cookies
@@ -193,17 +230,36 @@ class CfFileService extends FileService {
   /// Hosts where plain HTTP was refused; go straight to the WebView.
   static final Set<String> _webHosts = {};
 
+  /// Referer hosts (the reading site) whose images needed the WebView. CDN
+  /// hosts rotate per image, so remembering the CDN host alone isn't enough.
+  static final Set<String> _webRefHosts = {};
+
   @override
   Future<FileServiceResponse> get(
     String url, {
     Map<String, String>? headers,
   }) async {
+    // Pages captured from <canvas> readers live on disk as file:// URLs.
+    if (url.startsWith('file:')) {
+      try {
+        final bytes = await File.fromUri(Uri.parse(url)).readAsBytes();
+        return _BytesResponse(bytes, _extFor('', url));
+      } catch (e) {
+        CfDiag.log('local page missing $url: $e');
+        rethrow;
+      }
+    }
+
     final host = Uri.tryParse(url)?.host ?? '';
     // Only scraped sites send a Referer; MangaDex etc. never need the fallback.
     final canFallback = headers != null && headers.containsKey('Referer');
 
+    final referer = headers?['Referer'];
+    final refHost = referer == null ? '' : (Uri.tryParse(referer)?.host ?? '');
+
     FileServiceResponse? first;
-    if (!canFallback || !_webHosts.contains(host)) {
+    if (!canFallback ||
+        !(_webHosts.contains(host) || _webRefHosts.contains(refHost))) {
       try {
         first = await _http.get(url, headers: headers);
         final code = first.statusCode;
@@ -218,9 +274,10 @@ class CfFileService extends FileService {
       }
     }
 
-    final viaWeb = await CfWebFetcher.instance.fetch(url);
+    final viaWeb = await CfWebFetcher.instance.fetch(url, referer: referer);
     if (viaWeb != null) {
       _webHosts.add(host);
+      if (refHost.isNotEmpty) _webRefHosts.add(refHost);
       return _BytesResponse(viaWeb.bytes, _extFor(viaWeb.contentType, url));
     }
 

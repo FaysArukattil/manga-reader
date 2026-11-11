@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../models/series.dart';
+import '../services/page_cache.dart';
+import '../services/scrape/cf_session.dart';
 import '../services/thumbnail_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/components/pressable_scale.dart';
@@ -54,13 +56,17 @@ class SeriesCard extends StatelessWidget {
   Widget _image(BuildContext context) {
     final cover = series.coverUrl;
     if (cover == null || cover.isEmpty) return _fallbackImage(context);
+    // Same pipeline as reader pages: real WebView UA + cf_clearance cookie,
+    // and a WebView download fallback for Cloudflare-protected hosts (plain
+    // HTTP gets 403 there, which is why covers never showed).
     return CachedNetworkImage(
       imageUrl: cover,
-      httpHeaders: {
-        'User-Agent':
-            'Mozilla/5.0 (Linux; Android 14; Mobile; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
-        if (series.url.isNotEmpty) 'Referer': series.url,
-      },
+      cacheKey: cover,
+      cacheManager: PageCache.instance,
+      httpHeaders: CfSession.imageHeaders(
+        cover,
+        series.url.isNotEmpty ? series.url : null,
+      ),
       fit: BoxFit.cover,
       memCacheWidth: 420,
       fadeInDuration: const Duration(milliseconds: 140),

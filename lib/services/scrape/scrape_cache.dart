@@ -20,6 +20,10 @@ class ScrapeCache {
   static const Duration maxAge = Duration(days: 21);
   static const int _maxMemory = 60;
 
+  /// Bump when scraping output changes, so stale entries (wrong next links,
+  /// unreadable image URLs) are re-scraped instead of served from disk.
+  static const int _version = 2;
+
   final Map<String, _Entry> _mem = {};
   Directory? _dir;
 
@@ -66,6 +70,7 @@ class ScrapeCache {
         if (!await f.exists()) return null;
         final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
         if (m['url'] != key) return null; // hash collision guard
+        if (m['v'] != _version) return null; // scraped by an older engine
         e = _Entry.fromJson(m);
         _remember(key, e);
       } catch (_) {
@@ -115,6 +120,7 @@ class _Entry {
   final DateTime savedAt;
 
   Map<String, dynamic> toJson(String key) => {
+        'v': ScrapeCache._version,
         'url': key,
         'savedAt': savedAt.millisecondsSinceEpoch,
         'chapterUrl': result.chapterUrl,

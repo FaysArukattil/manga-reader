@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/url_tools.dart';
 import '../../ui/ad_block.dart';
@@ -17,6 +20,18 @@ class ScrapeService {
 
   final http.Client _client;
   final List<SiteAdapter> _adapters = [const GenericSiteAdapter()];
+
+  /// Chapters whose fast-path result was incomplete (lazy readers only put
+  /// the first few pages in the HTML). Returned as a last resort but never
+  /// written to the disk cache.
+  final Set<String> _partialUrls = {};
+
+  /// "13 pages" style hint in server HTML; 0 when absent.
+  static int _expectedPageCount(String html) {
+    final m = RegExp(r'(\d{1,4})\s*pages\b', caseSensitive: false)
+        .firstMatch(html.length > 400000 ? html.substring(0, 400000) : html);
+    return m == null ? 0 : (int.tryParse(m.group(1)!) ?? 0);
+  }
 
   /// The real WebView user-agent (see CfSession). It must be identical for the
   /// verification WebView, the headless scraper, HTTP and image downloads,
@@ -66,8 +81,10 @@ class ScrapeService {
       }
     }
 
+    _partialUrls.remove(url);
     final result = await _scrapeChapter(url);
-    if (result.pages.length >= 2 && !result.needsVerification) {
+    final isPartial = _partialUrls.remove(url);
+    if (result.pages.length >= 2 && !result.needsVerification && !isPartial) {
       await ScrapeCache.instance.put(url, result);
       if (result.chapterUrl != url) {
         await ScrapeCache.instance.put(result.chapterUrl, result);
@@ -111,6 +128,7 @@ class ScrapeService {
     }
 
     final adapter = _adapterFor(uri.host);
+    ScrapedChapterResult? partial;
 
     // ------------------------------------------------------------- 1. Fast Path
     // Skipped for hosts that already challenged plain HTTP: Dart's HTTP client
@@ -150,7 +168,17 @@ class ScrapeService {
           if (result.needsVerification) {
             CfSession.webViewOnlyHosts.add(uri.host);
           } else if (result.pages.length >= 2) {
-            return result; // Fast path succeeded!
+            final expected = _expectedPageCount(response.body);
+            if (expected <= result.pages.length) {
+              return result; // Fast path succeeded!
+            }
+            // Lazy reader: the HTML only held the first few pages. Render it
+            // in the WebView to get all of them; keep this as a fallback.
+            CfDiag.log(
+              'fast path incomplete ${uri.host} '
+              '${result.pages.length}/$expected -> rendering',
+            );
+            partial = result;
           } else {
             // Series overview page? Auto-hop to the first available chapter.
             final targetUrl = result.firstChapterUrl ??
@@ -203,7 +231,14 @@ class ScrapeService {
           );
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      CfDiag.log('rendered path failed ${uri.host}: $e');
+    }
+
+    if (partial != null) {
+      _partialUrls.add(url);
+      return partial;
+    }
 
     // Fallback: return best effort or stepChapter
     return ScrapedChapterResult(
@@ -239,6 +274,7 @@ class ScrapeService {
   Future<ScrapedChapterResult> _scrapeHeadless(String url, Uri uri) async {
     final completer = Completer<ScrapedChapterResult>();
     HeadlessInAppWebView? headless;
+    var started = false;
     var challengeSeen = false;
     Timer? quietTimer;
 
@@ -254,116 +290,165 @@ class ScrapeService {
       contentBlockers: buildContentBlockers(),
     );
 
+    /// Reads the current list of page image URLs from the live DOM.
+    Future<List<String>> readUrls(InAppWebViewController c) async {
+      final res = await c.evaluateJavascript(source: WebScraper.extractImagesJs);
+      final out = <String>[];
+      if (res is List) {
+        for (final p in res) {
+          if (p != null && p.toString().isNotEmpty) out.add(p.toString());
+        }
+      }
+      return out;
+    }
+
+    /// The page is rendered by JavaScript, often only AFTER onLoadStop
+    /// (Next.js / React readers, lazy images). A single immediate read, as
+    /// before, saw an empty reader. So: poll, scrolling down step by step,
+    /// until the page list stops growing (or reaches the page count the site
+    /// announces).
+    Future<void> runExtraction(InAppWebViewController c) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 40));
+      var pages = <String>[];
+      var lastCount = -1;
+      var stable = 0;
+      var bottom = false;
+      var expected = 0;
+      var stillChallenge = false;
+
+      while (DateTime.now().isBefore(deadline) && !completer.isCompleted) {
+        try {
+          final isChallenge =
+              await c.evaluateJavascript(source: CfSession.challengeProbeJs);
+          if (isChallenge == true) {
+            // Managed challenges clear themselves in a few seconds.
+            challengeSeen = true;
+            stillChallenge = true;
+            await Future<void>.delayed(const Duration(milliseconds: 1000));
+            continue;
+          }
+          stillChallenge = false;
+
+          await c.evaluateJavascript(source: WebScraper.stripAdsJs);
+          final atBottom =
+              await c.evaluateJavascript(source: WebScraper.scrollStepJs);
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+
+          pages = await readUrls(c);
+          if (expected == 0) {
+            final e = await c.evaluateJavascript(
+              source: WebScraper.expectedPagesJs,
+            );
+            if (e is num) expected = e.toInt();
+          }
+          if (atBottom == true) bottom = true;
+
+          if (pages.length == lastCount) {
+            stable++;
+          } else {
+            stable = 0;
+            lastCount = pages.length;
+          }
+
+          final complete = expected > 0 && pages.length >= expected;
+          if (pages.length >= 2 && (complete || (bottom && stable >= 3))) break;
+          if (pages.length < 2 && bottom && stable >= 6) break;
+        } catch (_) {
+          // Navigation / reload in progress; try again.
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+      }
+
+      if (completer.isCompleted) return;
+
+      if (stillChallenge && pages.length < 2) {
+        challengeSeen = true;
+        finish(_needsVerification(url));
+        return;
+      }
+
+      try {
+        // Readers that draw pages on <canvas> (comix.to unscrambles its
+        // images there; the raw image URLs are scrambled AND hotlink
+        // protected) have the correct pictures only in the canvases:
+        // snapshot those to files. Prefer them whenever they cover at least
+        // as many pages as the URL scan found.
+        final rendered = await _captureRendered(c, url, atLeast: pages.length);
+        if (rendered.length >= 2) {
+          CfDiag.log(
+            'using ${rendered.length} rendered pages (urls=${pages.length})',
+          );
+          pages = rendered;
+        }
+
+        final nav = await c.evaluateJavascript(
+          source: WebScraper.extractNavigationJs,
+        );
+        final metaCover = await c.evaluateJavascript(
+          source: WebScraper.extractCoverJs,
+        );
+        final finalTitle = await c.getTitle();
+
+        String? nextUrl;
+        String? prevUrl;
+        final availableChapters = <ChapterRef>[];
+        if (nav is Map) {
+          nextUrl = nav['next']?.toString();
+          prevUrl = nav['prev']?.toString();
+          final chList = nav['chapters'];
+          if (chList is List) {
+            for (final ch in chList) {
+              if (ch is Map && ch['url'] != null && ch['label'] != null) {
+                availableChapters.add(
+                  ChapterRef(
+                    url: ch['url'].toString(),
+                    label: ch['label'].toString(),
+                  ),
+                );
+              }
+            }
+          }
+        }
+
+        // Page passed Cloudflare -> remember its cookies for image requests.
+        await CfSession.primeAll(url, pages);
+
+        CfDiag.log('headless done ${uri.host} pages=${pages.length}');
+        finish(
+          ScrapedChapterResult(
+            chapterUrl: url,
+            pages: pages,
+            title: finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
+            chapterLabel: UrlTools.chapterLabel(url),
+            nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
+            prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
+            nextGuessed: nextUrl == null,
+            isWebtoon: pages.length >= 2,
+            availableChapters: availableChapters,
+            coverUrl: metaCover is String && metaCover.startsWith('http')
+                ? metaCover
+                : null,
+          ),
+        );
+      } catch (e) {
+        CfDiag.log('headless extract error $e');
+        finish(ScrapedChapterResult(chapterUrl: url, pages: const []));
+      }
+    }
+
     headless = HeadlessInAppWebView(
       initialSize: const Size(1080, 1920),
       initialUrlRequest: URLRequest(url: WebUri(url)),
       initialSettings: settings,
       onLoadStop: (controller, loadedUrl) async {
-        if (completer.isCompleted) return;
-        try {
-          final isChallenge = await controller.evaluateJavascript(
-            source: CfSession.challengeProbeJs,
-          );
-
-          CfDiag.log(
-            'headless loaded ${uri.host} challenge=$isChallenge '
-            'title="${await controller.getTitle()}"',
-          );
-
-          if (isChallenge == true) {
-            // Cloudflare "managed" challenges solve themselves in a few
-            // seconds and then reload the page (-> onLoadStop fires again).
-            // Do NOT give up here; just wait. The overall timeout below
-            // decides when to ask the user.
-            challengeSeen = true;
-            return;
-          }
-
-          // 1. Strip ads & popups
-          await controller.evaluateJavascript(source: WebScraper.stripAdsJs);
-
-          // 2. Trigger lazy loaders with dynamic scroll
-          await controller.evaluateJavascript(
-            source:
-                '(function(){window.scrollTo(0, document.body.scrollHeight/2); setTimeout(function(){window.scrollTo(0, document.body.scrollHeight); setTimeout(function(){window.scrollTo(0,0);}, 250);}, 250);})()',
-          );
-          await Future<void>.delayed(const Duration(milliseconds: 700));
-
-          // 3. Extract images and chapter navigation
-          final res = await controller.evaluateJavascript(
-            source: WebScraper.extractImagesJs,
-          );
-          final nav = await controller.evaluateJavascript(
-            source: WebScraper.extractNavigationJs,
-          );
-          final finalTitle = await controller.getTitle();
-
-          final pages = <String>[];
-          if (res is List) {
-            for (final p in res) {
-              if (p != null && p.toString().isNotEmpty) {
-                pages.add(p.toString());
-              }
-            }
-          }
-
-          if (pages.isEmpty) {
-            // Still an interstitial that appeared late? (strict probe only;
-            // the word "Cloudflare" in a footer must NOT count.)
-            final again = await controller.evaluateJavascript(
-              source: CfSession.challengeProbeJs,
-            );
-            if (again == true) {
-              challengeSeen = true;
-              return;
-            }
-          }
-
-          String? nextUrl;
-          String? prevUrl;
-          final availableChapters = <ChapterRef>[];
-
-          if (nav is Map) {
-            nextUrl = nav['next']?.toString();
-            prevUrl = nav['prev']?.toString();
-            final chList = nav['chapters'];
-            if (chList is List) {
-              for (final c in chList) {
-                if (c is Map && c['url'] != null && c['label'] != null) {
-                  availableChapters.add(
-                    ChapterRef(
-                      url: c['url'].toString(),
-                      label: c['label'].toString(),
-                    ),
-                  );
-                }
-              }
-            }
-          }
-
-          // Page passed Cloudflare -> remember its cookies for image requests.
-          await CfSession.primeCookies(url);
-
-          finish(
-            ScrapedChapterResult(
-              chapterUrl: url,
-              pages: pages,
-              title: finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
-              chapterLabel: UrlTools.chapterLabel(url),
-              nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
-              prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
-              nextGuessed: nextUrl == null,
-              isWebtoon: pages.length >= 2,
-              availableChapters: availableChapters,
-            ),
-          );
-        } catch (e) {
-          finish(ScrapedChapterResult(chapterUrl: url, pages: const []));
-        }
+        if (completer.isCompleted || started) return;
+        started = true;
+        CfDiag.log('headless loaded ${uri.host} -> polling');
+        await runExtraction(controller);
       },
       onReceivedError: (controller, request, error) {
         // Only abort if the main web page itself failed to load
-        if (request.isForMainFrame == true && !challengeSeen) {
+        if (request.isForMainFrame == true && !started && !challengeSeen) {
           finish(ScrapedChapterResult(chapterUrl: url, pages: const []));
         }
       },
@@ -371,15 +456,14 @@ class ScrapeService {
 
     await headless!.run();
 
-    // Page never finished loading and no challenge was recognised: hand over
-    // to the visible verification screen instead of hanging.
-    quietTimer = Timer(const Duration(seconds: 15), () {
-      if (!challengeSeen) finish(_needsVerification(url));
+    // Page never finished loading: hand over to the visible verification
+    // screen instead of hanging.
+    quietTimer = Timer(const Duration(seconds: 25), () {
+      if (!started) finish(_needsVerification(url));
     });
 
-    // A challenge got 30s to clear on its own; after that the user is asked.
     return completer.future.timeout(
-      const Duration(seconds: 30),
+      const Duration(seconds: 70),
       onTimeout: () {
         CfDiag.log('headless timeout challengeSeen=$challengeSeen $url');
         final r = _needsVerification(url);
@@ -387,5 +471,53 @@ class ScrapeService {
         return r;
       },
     );
+  }
+
+  /// Snapshots canvas / blob: images to files and returns `file://` URLs.
+  /// (CfFileService serves those straight from disk, so the reader needs no
+  /// special handling.)
+  Future<List<String>> _captureRendered(
+    InAppWebViewController c,
+    String url, {
+    int atLeast = 0,
+  }) async {
+    final out = <String>[];
+    try {
+      final count = await c.evaluateJavascript(
+        source: WebScraper.collectRenderedJs,
+      );
+      final n = count is num ? count.toInt() : 0;
+      if (n < 2 || n < atLeast) return out;
+
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory('${base.path}/rendered');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final key = _hashKey(url);
+
+      for (var i = 0; i < n; i++) {
+        final data = await c.evaluateJavascript(
+          source: 'window.__smPages && window.__smPages[$i]',
+        );
+        if (data is! String) continue;
+        final comma = data.indexOf(',');
+        if (comma < 0) continue;
+        final bytes = base64Decode(data.substring(comma + 1));
+        final file = File('${dir.path}/${key}_${i.toString().padLeft(3, '0')}.jpg');
+        await file.writeAsBytes(bytes);
+        out.add(file.uri.toString());
+      }
+      await c.evaluateJavascript(source: 'window.__smPages = null;');
+    } catch (e) {
+      CfDiag.log('capture rendered failed: $e');
+    }
+    return out;
+  }
+
+  static String _hashKey(String s) {
+    var h = 0x811c9dc5;
+    for (final b in utf8.encode(s)) {
+      h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF;
+    }
+    return h.toRadixString(16).padLeft(8, '0');
   }
 }

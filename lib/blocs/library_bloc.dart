@@ -298,7 +298,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
         final scraped = await _scrape.scrapeChapter(s.url);
         final cover = scraped.coverUrl ??
             (scraped.pages.isNotEmpty ? scraped.pages.first : null);
-        if (cover != null && cover.isNotEmpty) {
+        if (cover != null && cover.startsWith('http')) {
           _repo.update(s.id, {'coverUrl': cover}, touch: false);
         }
       } catch (_) {}
@@ -334,7 +334,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
         final scraped = await _scrape.scrapeChapter(s.url);
         final cover = scraped.coverUrl ??
             (scraped.pages.isNotEmpty ? scraped.pages.first : null);
-        if (cover != null && cover.isNotEmpty) {
+        if (cover != null && cover.startsWith('http')) {
           _repo.update(s.id, {'coverUrl': cover}, touch: false);
         }
       } catch (_) {}

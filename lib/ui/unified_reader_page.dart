@@ -1332,10 +1332,16 @@ class _LoadingBookPlaceholder extends StatelessWidget {
           Positioned.fill(
             child: Opacity(
               opacity: 0.18,
-              child: Image.network(
-                series.coverUrl!,
+              child: CachedNetworkImage(
+                imageUrl: series.coverUrl!,
+                cacheKey: series.coverUrl!,
+                cacheManager: PageCache.instance,
+                httpHeaders: CfSession.imageHeaders(
+                  series.coverUrl!,
+                  series.url.isNotEmpty ? series.url : null,
+                ),
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                errorWidget: (_, __, ___) => const SizedBox.shrink(),
               ),
             ),
           ),

@@ -171,7 +171,7 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
       final cover = source.lastCoverUrl ??
           (initialPages.isNotEmpty ? initialPages.first.url : null);
       if (cover != null &&
-          cover.isNotEmpty &&
+          cover.startsWith('http') &&
           (series.coverUrl == null || series.coverUrl!.isEmpty)) {
         library?.update(series.id, {'coverUrl': cover}, touch: false);
       }
@@ -296,7 +296,7 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
       final cover = source.lastCoverUrl ??
           (pages.isNotEmpty ? pages.first.url : null);
       if (cover != null &&
-          cover.isNotEmpty &&
+          cover.startsWith('http') &&
           (series.coverUrl == null || series.coverUrl!.isEmpty)) {
         library?.update(series.id, {'coverUrl': cover}, touch: false);
       }
