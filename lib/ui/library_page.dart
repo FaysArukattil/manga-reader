@@ -1,6 +1,5 @@
 import 'dart:ui' show ImageFilter;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
@@ -1596,20 +1595,6 @@ class _LibraryPageState extends State<LibraryPage> {
                           onAdd: () => _openForm(),
                           onAddWithLink: (url, title) =>
                               _openForm(url: url, title: title),
-                          onQuickAdd: (starter) {
-                            final s = Series.create(
-                              id: context.read<LibraryRepository>().newId(),
-                              url: starter.url,
-                              title: starter.title,
-                            ).copyWith(
-                              chapter: starter.chapter,
-                              coverUrl: starter.coverUrl,
-                            );
-                            context
-                                .read<LibraryBloc>()
-                                .add(LibraryAddRequested(s));
-                            _snack('Added "${starter.title}" to your shelf');
-                          },
                         ),
                       )
                     else if (state.visible.isEmpty)
@@ -2144,67 +2129,14 @@ class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant _PinnedBarDelegate old) => true;
 }
 
-class _StarterItem {
-  const _StarterItem({
-    required this.title,
-    required this.url,
-    required this.coverUrl,
-    required this.genre,
-    required this.chapter,
-  });
-
-  final String title;
-  final String url;
-  final String coverUrl;
-  final String genre;
-  final String chapter;
-}
-
-const _kStarters = [
-  _StarterItem(
-    title: 'Solo Leveling',
-    url: 'https://asuracomic.net/series/solo-leveling-chapter-1',
-    coverUrl:
-        'https://upload.wikimedia.org/wikipedia/en/9/9f/Solo_Leveling_webtoon_cover.png',
-    genre: 'Action • Fantasy',
-    chapter: 'Ch. 1',
-  ),
-  _StarterItem(
-    title: 'One Piece',
-    url: 'https://tcbscans.me/manga/one-piece',
-    coverUrl:
-        'https://upload.wikimedia.org/wikipedia/en/a/a3/One_Piece%2C_Volume_1.jpg',
-    genre: 'Adventure • Shonen',
-    chapter: 'Ch. 1',
-  ),
-  _StarterItem(
-    title: 'Jujutsu Kaisen',
-    url: 'https://tcbscans.me/manga/jujutsu-kaisen',
-    coverUrl:
-        'https://upload.wikimedia.org/wikipedia/en/4/46/Jujutsu_kaisen.jpg',
-    genre: 'Dark Fantasy',
-    chapter: 'Ch. 1',
-  ),
-  _StarterItem(
-    title: 'Chainsaw Man',
-    url: 'https://tcbscans.me/manga/chainsaw-man',
-    coverUrl:
-        'https://upload.wikimedia.org/wikipedia/en/3/3b/Chainsaw_Man_volume_1_cover.jpg',
-    genre: 'Action • Supernatural',
-    chapter: 'Ch. 1',
-  ),
-];
-
 class _EmptyState extends StatefulWidget {
   const _EmptyState({
     required this.onAdd,
     this.onAddWithLink,
-    this.onQuickAdd,
   });
 
   final VoidCallback onAdd;
   final void Function(String url, String? title)? onAddWithLink;
-  final void Function(_StarterItem starter)? onQuickAdd;
 
   @override
   State<_EmptyState> createState() => _EmptyStateState();
@@ -2234,94 +2166,63 @@ class _EmptyStateState extends State<_EmptyState> {
     final t = context.tokens;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 80),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Hero Animated Visual
-          Center(
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: t.accent.withValues(alpha: 0.18),
-                        blurRadius: 50,
-                        spreadRadius: 10,
-                      ),
-                    ],
-                  ),
+          // Ambient Glowing Logo
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: t.accent.withValues(alpha: 0.16),
+                      blurRadius: 40,
+                      spreadRadius: 8,
+                    ),
+                  ],
                 ),
-                const BrandLogo(size: 96, withGlow: true),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Tagline Chip
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-            decoration: BoxDecoration(
-              color: t.accent.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: t.accent.withValues(alpha: 0.35),
-                width: 1,
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.auto_awesome_rounded, size: 14, color: t.accent),
-                const SizedBox(width: 6),
-                Text(
-                  'PURE NATIVE MANGA READER',
-                  style: TextStyle(
-                    color: t.accent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.8,
-                  ),
-                ),
-              ],
-            ),
+              const BrandLogo(size: 88, withGlow: true),
+            ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 24),
 
-          // Title & Value Proposition
+          // Headline
           Text(
-            'Your shelf is waiting for its first story',
-            textAlign: TextAlign.center,
+            'Your shelf is empty',
             style: TextStyle(
-              fontSize: 23,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.6,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
               color: t.textPrimary,
-              height: 1.25,
             ),
           ),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          const SizedBox(height: 8),
+
+          // Explanatory subtitle
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
             child: Text(
-              'Paste any manga, manhwa, or webtoon chapter URL. Shelfmark automatically strips every intrusive advertisement, optimizes high-res panels, and bookmarks your progress.',
+              'Paste a link to any manga or webtoon chapter. Shelfmark removes every ad and bookmarks your reading progress automatically.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: t.textSecondary,
                 fontSize: 13.5,
-                height: 1.5,
+                height: 1.45,
               ),
             ),
           ),
-          const SizedBox(height: 24),
 
-          // 2. Clipboard Quick-Detector Banner (if URL detected)
+          // Detected link chip (one-tap paste)
           if (_clipboardUrl != null) ...[
+            const SizedBox(height: 20),
             PressableScale(
               onTap: () {
                 HapticFeedback.mediumImpact();
@@ -2332,483 +2233,81 @@ class _EmptyStateState extends State<_EmptyState> {
                 }
               },
               child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: t.accent.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(18),
+                  color: t.accent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: t.accent.withValues(alpha: 0.45),
-                    width: 1.2,
+                    color: t.accent.withValues(alpha: 0.35),
+                    width: 1,
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: t.accent.withValues(alpha: 0.12),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
                 ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: t.accent.withValues(alpha: 0.20),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(Icons.link_rounded, size: 20, color: t.accent),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Link detected in clipboard!',
-                            style: TextStyle(
-                              color: t.textPrimary,
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _clipboardUrl!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: t.accent,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    Icon(Icons.content_paste_rounded, size: 16, color: t.accent),
                     const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: t.accent,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Read Now',
+                    Flexible(
+                      child: Text(
+                        'Paste copied link (${Uri.tryParse(_clipboardUrl!)?.host ?? "webpage"})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Color(0xFF04130C),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
+                          color: t.accent,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.arrow_forward_rounded, size: 14, color: t.accent),
                   ],
                 ),
               ),
             ),
           ],
+          const SizedBox(height: 24),
 
-          // 3. Primary Big Action Button
+          // Primary Paste Button
           PressableScale(
             onTap: () {
               HapticFeedback.mediumImpact();
               widget.onAdd();
             },
             child: Container(
-              width: double.infinity,
-              height: 56,
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 28),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                gradient: LinearGradient(
-                  colors: [
-                    t.accent,
-                    const Color(0xFF00E676),
-                  ],
-                ),
+                borderRadius: BorderRadius.circular(26),
+                color: t.accent,
                 boxShadow: [
                   BoxShadow(
-                    color: t.accent.withValues(alpha: 0.38),
-                    blurRadius: 18,
-                    offset: const Offset(0, 5),
+                    color: t.accent.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
               child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     Icons.add_link_rounded,
-                    size: 22,
+                    size: 20,
                     color: Color(0xFF04130C),
                   ),
-                  SizedBox(width: 10),
+                  SizedBox(width: 8),
                   Text(
-                    'Paste Chapter Link & Start Reading',
+                    'Paste Manga Link',
                     style: TextStyle(
                       color: Color(0xFF04130C),
-                      fontSize: 15,
+                      fontSize: 14.5,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.2,
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-          const SizedBox(height: 36),
-
-          // 4. Curated Starter Manga Picks
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.local_fire_department_rounded,
-                    size: 18,
-                    color: Colors.orangeAccent,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'POPULAR STARTER PICKS',
-                    style: TextStyle(
-                      color: t.textPrimary,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                ],
-              ),
-              Text(
-                'One-tap add',
-                style: TextStyle(
-                  color: t.accent,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          SizedBox(
-            height: 205,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              itemCount: _kStarters.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final item = _kStarters[index];
-                return _StarterCard(
-                  item: item,
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    if (widget.onAddWithLink != null) {
-                      widget.onAddWithLink!(item.url, item.title);
-                    } else {
-                      widget.onAdd();
-                    }
-                  },
-                  onQuickAdd: () {
-                    HapticFeedback.mediumImpact();
-                    widget.onQuickAdd?.call(item);
-                  },
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 36),
-
-          // 5. "How Shelfmark Works" 3-Card Studio Grid
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'HOW SHELFMARK WORKS',
-              style: TextStyle(
-                color: t.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.5,
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          const _FeatureTile(
-            icon: Icons.link_rounded,
-            iconColor: Colors.blueAccent,
-            title: '1. Copy Any Chapter Link',
-            subtitle:
-                'Browse your favorite manga, webtoon, or scanlation site and copy any chapter URL.',
-          ),
-          const SizedBox(height: 10),
-          _FeatureTile(
-            icon: Icons.shield_rounded,
-            iconColor: t.accent,
-            title: '2. All Advertisements Stripped',
-            subtitle:
-                'Shelfmark filters video popups, fake download redirects, and banners completely.',
-          ),
-          const SizedBox(height: 10),
-          const _FeatureTile(
-            icon: Icons.bookmark_added_rounded,
-            iconColor: Colors.purpleAccent,
-            title: '3. Never Lose Your Spot',
-            subtitle:
-                'Your reading position, page scroll, and next chapter are bookmarked automatically.',
-          ),
-          const SizedBox(height: 24),
-
-          // 6. Supported Sources Ribbon
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: t.surfaceCard,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: t.border),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle_outline_rounded,
-                    size: 18, color: t.accent),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Compatible with MangaDex, TCB, Webtoons, Asura, Reaper, Flame & 100+ sites',
-                    style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StarterCard extends StatelessWidget {
-  const _StarterCard({
-    required this.item,
-    required this.onTap,
-    required this.onQuickAdd,
-  });
-
-  final _StarterItem item;
-  final VoidCallback onTap;
-  final VoidCallback onQuickAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-
-    return PressableScale(
-      onTap: onTap,
-      child: Container(
-        width: 136,
-        decoration: BoxDecoration(
-          color: t.surfaceCard,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: t.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Poster Artwork
-              CachedNetworkImage(
-                imageUrl: item.coverUrl,
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Container(
-                  color: const Color(0xFF131722),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.menu_book_rounded,
-                            size: 28, color: t.accent.withValues(alpha: 0.6)),
-                        const SizedBox(height: 6),
-                        Text(
-                          item.title,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: t.textPrimary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-              // Gradient Shade Overlay
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.35),
-                        Colors.black.withValues(alpha: 0.92),
-                      ],
-                      stops: const [0.3, 0.65, 1.0],
-                    ),
-                  ),
-                ),
-              ),
-
-              // Content & Add Button
-              Positioned(
-                left: 10,
-                right: 10,
-                bottom: 10,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      item.genre,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: t.accent,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    PressableScale(
-                      onTap: onQuickAdd,
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 5),
-                        decoration: BoxDecoration(
-                          color: t.accent,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.add_rounded,
-                              size: 14,
-                              color: Color(0xFF04130C),
-                            ),
-                            SizedBox(width: 4),
-                            Text(
-                              'Add',
-                              style: TextStyle(
-                                color: Color(0xFF04130C),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FeatureTile extends StatelessWidget {
-  const _FeatureTile({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: t.surfaceCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.border),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, size: 20, color: iconColor),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: t.textSecondary,
-                    fontSize: 12,
-                    height: 1.35,
-                  ),
-                ),
-              ],
             ),
           ),
         ],
