@@ -285,9 +285,23 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
   Future<void> _onAdd(LibraryAddRequested e, Emitter<LibraryState> emit) async {
     final s = e.series;
     _repo.add(s);
-    if (s.mdId == null && !s.titleAuto && s.title.isNotEmpty) {
-      final cover = await _anilist.findCover(s.title);
-      if (cover != null) _repo.update(s.id, {'coverUrl': cover}, touch: false);
+    if (s.mdId == null) {
+      if (!s.titleAuto && s.title.isNotEmpty) {
+        final cover = await _anilist.findCover(s.title);
+        if (cover != null) {
+          _repo.update(s.id, {'coverUrl': cover}, touch: false);
+          return;
+        }
+      }
+      // Auto-extract thumbnail directly from website (og:image, cover meta, or page 1)
+      try {
+        final scraped = await _scrape.scrapeChapter(s.url);
+        final cover = scraped.coverUrl ??
+            (scraped.pages.isNotEmpty ? scraped.pages.first : null);
+        if (cover != null && cover.isNotEmpty) {
+          _repo.update(s.id, {'coverUrl': cover}, touch: false);
+        }
+      } catch (_) {}
     }
   }
 
@@ -309,8 +323,21 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
         },
         touch: false);
     if (e.refetchCover) {
-      final cover = await _anilist.findCover(s.title);
-      if (cover != null) _repo.update(s.id, {'coverUrl': cover}, touch: false);
+      if (!s.titleAuto && s.title.isNotEmpty) {
+        final cover = await _anilist.findCover(s.title);
+        if (cover != null) {
+          _repo.update(s.id, {'coverUrl': cover}, touch: false);
+          return;
+        }
+      }
+      try {
+        final scraped = await _scrape.scrapeChapter(s.url);
+        final cover = scraped.coverUrl ??
+            (scraped.pages.isNotEmpty ? scraped.pages.first : null);
+        if (cover != null && cover.isNotEmpty) {
+          _repo.update(s.id, {'coverUrl': cover}, touch: false);
+        }
+      } catch (_) {}
     }
   }
 

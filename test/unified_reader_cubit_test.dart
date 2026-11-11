@@ -14,6 +14,9 @@ class FakeChapterSource implements ChapterSource {
   final Map<String, String> nextMap;
 
   @override
+  String? get lastCoverUrl => null;
+
+  @override
   Future<List<ReaderPageItem>> loadChapter(String chapterId) async {
     return chapters[chapterId] ?? [];
   }
@@ -125,5 +128,52 @@ void main() {
 
       await cubit.close();
     });
+
+    test('emits needsVerification when VerificationRequiredException is thrown',
+        () async {
+      final verifySource = _VerifyingFakeChapterSource(
+        challengeUrl: 'https://example.com/cf-challenge',
+      );
+
+      final cubit = UnifiedReaderCubit(
+        source: verifySource,
+        series: testSeries,
+        startChapterId: 'ch-locked',
+      );
+
+      await cubit.init();
+
+      expect(cubit.state.loading, isFalse);
+      expect(cubit.state.needsVerification, isTrue);
+      expect(
+        cubit.state.verificationUrl,
+        equals('https://example.com/cf-challenge'),
+      );
+
+      await cubit.close();
+    });
   });
+}
+
+class _VerifyingFakeChapterSource implements ChapterSource {
+  _VerifyingFakeChapterSource({required this.challengeUrl});
+  final String challengeUrl;
+
+  @override
+  String? get lastCoverUrl => null;
+
+  @override
+  Future<List<ReaderPageItem>> loadChapter(String chapterId) async {
+    throw VerificationRequiredException(challengeUrl);
+  }
+
+  @override
+  Future<String?> getNextChapterId(String currentChapterId) async => null;
+
+  @override
+  Future<String?> getPrevChapterId(String currentChapterId) async => null;
+
+  @override
+  Future<List<ChapterRef>> getAvailableChapters(String currentChapterId) async =>
+      const [];
 }

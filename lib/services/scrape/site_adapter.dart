@@ -23,6 +23,10 @@ class ScrapedChapterResult {
     this.prevChapterUrl,
     this.isWebtoon = false,
     this.availableChapters = const [],
+    this.coverUrl,
+    this.firstChapterUrl,
+    this.needsVerification = false,
+    this.verificationUrl,
   });
 
   final String chapterUrl;
@@ -33,6 +37,10 @@ class ScrapedChapterResult {
   final String? prevChapterUrl;
   final bool isWebtoon;
   final List<ChapterRef> availableChapters;
+  final String? coverUrl;
+  final String? firstChapterUrl;
+  final bool needsVerification;
+  final String? verificationUrl;
 
   ScrapedChapterResult copyWith({
     String? chapterUrl,
@@ -43,6 +51,10 @@ class ScrapedChapterResult {
     String? prevChapterUrl,
     bool? isWebtoon,
     List<ChapterRef>? availableChapters,
+    String? coverUrl,
+    String? firstChapterUrl,
+    bool? needsVerification,
+    String? verificationUrl,
   }) =>
       ScrapedChapterResult(
         chapterUrl: chapterUrl ?? this.chapterUrl,
@@ -53,6 +65,10 @@ class ScrapedChapterResult {
         prevChapterUrl: prevChapterUrl ?? this.prevChapterUrl,
         isWebtoon: isWebtoon ?? this.isWebtoon,
         availableChapters: availableChapters ?? this.availableChapters,
+        coverUrl: coverUrl ?? this.coverUrl,
+        firstChapterUrl: firstChapterUrl ?? this.firstChapterUrl,
+        needsVerification: needsVerification ?? this.needsVerification,
+        verificationUrl: verificationUrl ?? this.verificationUrl,
       );
 }
 

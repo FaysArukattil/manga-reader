@@ -66,7 +66,29 @@ class GenericSiteAdapter implements SiteAdapter {
     dom.Document document,
     Uri pageUri,
   ) async {
-    // 1. Find reader container or largest image cluster
+    // 0. Detect Cloudflare / Security verification challenge
+    final pageTitle = document.querySelector('title')?.text.trim() ?? '';
+    final bodyText = document.body?.text ?? '';
+    if (pageTitle.contains('Just a moment...') ||
+        pageTitle.contains('Verify you are human') ||
+        pageTitle.contains('Attention Required! | Cloudflare') ||
+        bodyText.contains('challenges.cloudflare.com') ||
+        bodyText.contains('cf-turnstile')) {
+      return ScrapedChapterResult(
+        chapterUrl: pageUri.toString(),
+        pages: const [],
+        needsVerification: true,
+        verificationUrl: pageUri.toString(),
+      );
+    }
+
+    // 1. Extract cover image from meta tags or poster
+    final coverUrl = _extractCover(document, pageUri);
+
+    // 2. Check for "Start Reading" button on overview pages
+    final startReadingUrl = _findStartReadingLink(document, pageUri);
+
+    // 3. Find reader container or largest image cluster
     dom.Element? readerContainer;
     for (final sel in _readerSelectors) {
       final el = document.querySelector(sel);
@@ -80,9 +102,22 @@ class GenericSiteAdapter implements SiteAdapter {
     if (readerContainer != null) {
       imgElements.addAll(readerContainer.querySelectorAll('img'));
     } else {
-      // Find the element with the highest count of content images
-      final allImgs = document.querySelectorAll('img');
-      imgElements.addAll(allImgs);
+      // ONLY gather images if inside a content container with at least 4+ images
+      // (prevents treating 1-2 random thumbnails/recommendations on homepages as chapters)
+      final contentDivs =
+          document.querySelectorAll('div, section, article, main');
+      dom.Element? bestCluster;
+      int maxCount = 0;
+      for (final el in contentDivs) {
+        final count = el.querySelectorAll('img').length;
+        if (count >= 4 && count > maxCount) {
+          maxCount = count;
+          bestCluster = el;
+        }
+      }
+      if (bestCluster != null) {
+        imgElements.addAll(bestCluster.querySelectorAll('img'));
+      }
     }
 
     // Also parse <noscript> tags inside reader container if images were hidden for noscript
@@ -171,7 +206,141 @@ class GenericSiteAdapter implements SiteAdapter {
       prevChapterUrl: prevUrl,
       isWebtoon: pages.length >= 2,
       availableChapters: catalogue,
+      coverUrl: coverUrl ?? (pages.isNotEmpty ? pages.first : null),
+      firstChapterUrl: startReadingUrl ??
+          (catalogue.isNotEmpty ? catalogue.first.url : null),
     );
+  }
+
+  String? _extractCover(dom.Document doc, Uri baseUri) {
+    // 1. og:image or twitter:image
+    final og = doc
+            .querySelector('meta[property="og:image"]')
+            ?.attributes['content'] ??
+        doc
+            .querySelector('meta[name="twitter:image"]')
+            ?.attributes['content'];
+    if (og != null && og.trim().isNotEmpty) {
+      final res = _resolveUrl(og.trim(), baseUri);
+      if (res != null && !_isJunkCoverUrl(res)) return res;
+    }
+
+    // 2. Specific cover/poster elements
+    final coverSelectors = [
+      '.manga-poster img',
+      '.summary_image img',
+      '.thumb-manga img',
+      '.series-thumb img',
+      '.poster img',
+      '.cover img',
+      '.entry-thumb img',
+      '.book-info img',
+      '.thumb img',
+      '.novel-cover img',
+      '.manga-info-top img',
+    ];
+    for (final sel in coverSelectors) {
+      final img = doc.querySelector(sel);
+      if (img != null) {
+        final src = img.attributes['data-src'] ??
+            img.attributes['data-lazy-src'] ??
+            img.attributes['src'];
+        if (src != null && src.trim().isNotEmpty) {
+          final res = _resolveUrl(src.trim(), baseUri);
+          if (res != null && !_isJunkCoverUrl(res)) return res;
+        }
+      }
+    }
+
+    // 3. Fallback: inspect img tags for cover/poster in alt, class, or id
+    for (final img in doc.querySelectorAll('img')) {
+      final alt = (img.attributes['alt'] ?? '').toLowerCase();
+      final cls = (img.attributes['class'] ?? '').toLowerCase();
+      final id = (img.attributes['id'] ?? '').toLowerCase();
+      if (alt.contains('cover') ||
+          alt.contains('poster') ||
+          cls.contains('cover') ||
+          cls.contains('poster') ||
+          id.contains('cover') ||
+          id.contains('poster')) {
+        final src = img.attributes['data-src'] ??
+            img.attributes['data-lazy-src'] ??
+            img.attributes['src'];
+        if (src != null && src.trim().isNotEmpty) {
+          final res = _resolveUrl(src.trim(), baseUri);
+          if (res != null && !_isJunkCoverUrl(res)) return res;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  bool _isJunkCoverUrl(String url) {
+    final lower = url.toLowerCase();
+    for (final ad in blockedDomains) {
+      if (lower.contains(ad)) return true;
+    }
+    for (final k in [
+      'avatar',
+      'logo',
+      'banner',
+      'icon',
+      'button',
+      'spinner',
+      'placeholder',
+      'ads',
+      'advertisement',
+      'rating',
+      'star',
+    ]) {
+      if (lower.contains(k)) return true;
+    }
+    return false;
+  }
+
+  String? _findStartReadingLink(dom.Document doc, Uri baseUri) {
+    // 1. Dedicated button classes
+    final buttonSelectors = [
+      'a.read-now',
+      'a.btn-read',
+      'a.start-reading',
+      'a.btn-start-reading',
+      'a.first-chapter',
+      'a.read-first',
+      'a[href*="/chapter-1"]',
+      'a[href*="/chapter/1"]',
+      'a[href*="/chapter-01"]',
+      'a[href*="/read/1"]',
+    ];
+    for (final sel in buttonSelectors) {
+      final el = doc.querySelector(sel);
+      if (el != null) {
+        final href = el.attributes['href'];
+        if (href != null && href.trim().isNotEmpty) {
+          final res = _resolveUrl(href.trim(), baseUri);
+          if (res != null && res != baseUri.toString()) return res;
+        }
+      }
+    }
+
+    // 2. Scan anchor text for "Start Reading", "Read Now", etc.
+    for (final a in doc.querySelectorAll('a')) {
+      final text = a.text.trim().toLowerCase();
+      if (text.contains('start reading') ||
+          text.contains('read first') ||
+          text.contains('read now') ||
+          text.contains('first chapter') ||
+          text == 'read' ||
+          text.contains('read chapter 1')) {
+        final href = a.attributes['href'];
+        if (href != null && href.trim().isNotEmpty) {
+          final res = _resolveUrl(href.trim(), baseUri);
+          if (res != null && res != baseUri.toString()) return res;
+        }
+      }
+    }
+    return null;
   }
 
   List<String> _extractPagesFromScripts(dom.Document document, Uri baseUri) {

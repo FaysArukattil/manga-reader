@@ -21,6 +21,8 @@ class UnifiedReaderState extends Equatable {
     this.soundEffect = true,
     this.dim = 0.0,
     this.availableChapters = const [],
+    this.needsVerification = false,
+    this.verificationUrl,
     this.error,
   });
 
@@ -35,6 +37,8 @@ class UnifiedReaderState extends Equatable {
   final bool soundEffect;
   final double dim;
   final List<ChapterRef> availableChapters;
+  final bool needsVerification;
+  final String? verificationUrl;
   final String? error;
 
   ReaderPageItem? get currentPageItem =>
@@ -60,6 +64,9 @@ class UnifiedReaderState extends Equatable {
     bool? soundEffect,
     double? dim,
     List<ChapterRef>? availableChapters,
+    bool? needsVerification,
+    String? verificationUrl,
+    bool clearVerificationUrl = false,
     String? error,
     bool clearError = false,
   }) =>
@@ -75,6 +82,10 @@ class UnifiedReaderState extends Equatable {
         soundEffect: soundEffect ?? this.soundEffect,
         dim: dim ?? this.dim,
         availableChapters: availableChapters ?? this.availableChapters,
+        needsVerification: needsVerification ?? this.needsVerification,
+        verificationUrl: clearVerificationUrl
+            ? null
+            : (verificationUrl ?? this.verificationUrl),
         error: clearError ? null : (error ?? this.error),
       );
 
@@ -91,6 +102,8 @@ class UnifiedReaderState extends Equatable {
         soundEffect,
         dim,
         availableChapters,
+        needsVerification,
+        verificationUrl,
         error,
       ];
 }
@@ -137,6 +150,15 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
         return;
       }
 
+      // Update series cover thumbnail if missing
+      final cover = source.lastCoverUrl ??
+          (initialPages.isNotEmpty ? initialPages.first.url : null);
+      if (cover != null &&
+          cover.isNotEmpty &&
+          (series.coverUrl == null || series.coverUrl!.isEmpty)) {
+        library?.update(series.id, {'coverUrl': cover}, touch: false);
+      }
+
       _loadedChapterIds.add(chapterToLoad);
 
       // Restore position: prioritize pageKey match, fall back to startPageIndex
@@ -157,6 +179,8 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
         pages: initialPages,
         currentIndex: targetIndex,
         loading: false,
+        needsVerification: false,
+        clearVerificationUrl: true,
         availableChapters: catalogue,
       ));
 
@@ -164,6 +188,12 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
 
       // Check if we need to pre-fetch the next chapter
       await _checkPreloadNextChapter();
+    } on VerificationRequiredException catch (v) {
+      emit(state.copyWith(
+        loading: false,
+        needsVerification: true,
+        verificationUrl: v.url,
+      ));
     } catch (e) {
       emit(state.copyWith(
         loading: false,
@@ -172,8 +202,23 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
     }
   }
 
+  void retry() {
+    emit(state.copyWith(
+      loading: true,
+      clearError: true,
+      needsVerification: false,
+      clearVerificationUrl: true,
+    ));
+    init();
+  }
+
   Future<void> jumpToChapter(String chapterId, {int pageIndex = 0}) async {
-    emit(state.copyWith(loading: true, clearError: true));
+    emit(state.copyWith(
+      loading: true,
+      clearError: true,
+      needsVerification: false,
+      clearVerificationUrl: true,
+    ));
     try {
       final pages = await source.loadChapter(chapterId);
       if (pages.isEmpty) {
@@ -187,15 +232,33 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
       _loadedChapterIds.add(chapterId);
       final target = pageIndex.clamp(0, pages.length - 1);
       final catalogue = await source.getAvailableChapters(chapterId);
+
+      // Update series cover thumbnail if missing
+      final cover = source.lastCoverUrl ??
+          (pages.isNotEmpty ? pages.first.url : null);
+      if (cover != null &&
+          cover.isNotEmpty &&
+          (series.coverUrl == null || series.coverUrl!.isEmpty)) {
+        library?.update(series.id, {'coverUrl': cover}, touch: false);
+      }
+
       emit(state.copyWith(
         pages: pages,
         currentIndex: target,
         loading: false,
+        needsVerification: false,
+        clearVerificationUrl: true,
         availableChapters:
             catalogue.isNotEmpty ? catalogue : state.availableChapters,
       ));
       _triggerLocalSave();
       await _checkPreloadNextChapter();
+    } on VerificationRequiredException catch (v) {
+      emit(state.copyWith(
+        loading: false,
+        needsVerification: true,
+        verificationUrl: v.url,
+      ));
     } catch (e) {
       emit(state.copyWith(
         loading: false,

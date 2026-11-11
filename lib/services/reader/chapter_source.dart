@@ -28,6 +28,15 @@ abstract class ChapterSource {
   Future<String?> getNextChapterId(String currentChapterIdOrUrl);
   Future<String?> getPrevChapterId(String currentChapterIdOrUrl);
   Future<List<ChapterRef>> getAvailableChapters(String currentChapterIdOrUrl);
+  String? get lastCoverUrl;
+}
+
+class VerificationRequiredException implements Exception {
+  const VerificationRequiredException(this.url);
+  final String url;
+
+  @override
+  String toString() => 'VerificationRequiredException(url: $url)';
 }
 
 class ScrapedSource implements ChapterSource {
@@ -37,6 +46,10 @@ class ScrapedSource implements ChapterSource {
   final Map<String, String?> _nextMap = {};
   final Map<String, String?> _prevMap = {};
   final Map<String, List<ChapterRef>> _catalogueMap = {};
+  String? _lastCoverUrl;
+
+  @override
+  String? get lastCoverUrl => _lastCoverUrl;
 
   @override
   Future<List<ReaderPageItem>> loadChapter(String chapterIdOrUrl) async {
@@ -45,6 +58,15 @@ class ScrapedSource implements ChapterSource {
     _prevMap[chapterIdOrUrl] = result.prevChapterUrl;
     if (result.availableChapters.isNotEmpty) {
       _catalogueMap[chapterIdOrUrl] = result.availableChapters;
+    }
+    if (result.coverUrl != null && result.coverUrl!.isNotEmpty) {
+      _lastCoverUrl = result.coverUrl;
+    }
+
+    if (result.needsVerification) {
+      throw VerificationRequiredException(
+        result.verificationUrl ?? chapterIdOrUrl,
+      );
     }
 
     final label = result.chapterLabel ?? '';
@@ -112,6 +134,9 @@ class MangaDexSource implements ChapterSource {
   final MangaDexService service;
   final ChapterStore store;
   final List<MdChapter> chapters; // oldest first
+
+  @override
+  String? get lastCoverUrl => null;
 
   @override
   Future<List<ReaderPageItem>> loadChapter(String chapterId) async {

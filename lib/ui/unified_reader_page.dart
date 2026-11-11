@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../blocs/unified_reader_cubit.dart';
 import '../data/library_repository.dart';
@@ -453,6 +454,15 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
             builder: (context, state) {
               if (state.loading) {
                 return _LoadingBookPlaceholder(series: widget.series);
+              }
+
+              if (state.needsVerification) {
+                return _VerificationRequiredView(
+                  url: state.verificationUrl ?? widget.series.url,
+                  seriesTitle: widget.series.title,
+                  onVerified: () => _cubit.retry(),
+                  onCancel: _leave,
+                );
               }
 
               if (state.error != null && state.pages.isEmpty) {
@@ -1071,6 +1081,282 @@ class _LoadingBookPlaceholder extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _VerificationRequiredView extends StatefulWidget {
+  const _VerificationRequiredView({
+    required this.url,
+    required this.seriesTitle,
+    required this.onVerified,
+    required this.onCancel,
+  });
+
+  final String url;
+  final String seriesTitle;
+  final VoidCallback onVerified;
+  final VoidCallback onCancel;
+
+  @override
+  State<_VerificationRequiredView> createState() =>
+      _VerificationRequiredViewState();
+}
+
+class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
+  bool _modalOpened = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-open the verification modal sheet for immediate resolution
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_modalOpened) {
+        _openModal();
+      }
+    });
+  }
+
+  Future<void> _openModal() async {
+    setState(() => _modalOpened = true);
+    final verified = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      enableDrag: false,
+      builder: (ctx) => _VerificationModalSheet(url: widget.url),
+    );
+
+    if (verified == true) {
+      widget.onVerified();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00B96B).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.security_rounded,
+                color: Color(0xFF00B96B),
+                size: 48,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Security Verification Required',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '${widget.seriesTitle} requires Cloudflare / Turnstile human verification before displaying chapter pages.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _openModal,
+              icon: const Icon(Icons.verified_user_outlined, size: 18),
+              label: const Text('Verify & Open Book'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00B96B),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: widget.onCancel,
+              child: const Text(
+                'Go Back to Library',
+                style: TextStyle(color: Colors.white38),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VerificationModalSheet extends StatefulWidget {
+  const _VerificationModalSheet({required this.url});
+
+  final String url;
+
+  @override
+  State<_VerificationModalSheet> createState() =>
+      _VerificationModalSheetState();
+}
+
+class _VerificationModalSheetState extends State<_VerificationModalSheet> {
+  InAppWebViewController? _webViewController;
+  double _progress = 0;
+  bool _verifiedHandled = false;
+
+  void _checkTitleForBypass(String? title) {
+    if (_verifiedHandled || title == null) return;
+    final lower = title.toLowerCase();
+    final isChallenge = lower.contains('just a moment') ||
+        lower.contains('turnstile') ||
+        lower.contains('cloudflare') ||
+        lower.contains('security check') ||
+        lower.contains('verifying');
+    if (!isChallenge && title.trim().isNotEmpty) {
+      _verifiedHandled = true;
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context, true);
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final host = Uri.tryParse(widget.url)?.host ?? widget.url;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.88,
+      decoration: const BoxDecoration(
+        color: Color(0xFF141416),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.shield_outlined,
+                  color: Color(0xFF00B96B),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Security Verification',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        host,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh,
+                      color: Colors.white70, size: 20),
+                  tooltip: 'Reload',
+                  onPressed: () => _webViewController?.reload(),
+                ),
+                TextButton(
+                  onPressed: () {
+                    if (Navigator.canPop(context)) {
+                      Navigator.pop(context, true);
+                    }
+                  },
+                  child: const Text(
+                    'Done',
+                    style: TextStyle(
+                      color: Color(0xFF00B96B),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon:
+                      const Icon(Icons.close, color: Colors.white70, size: 20),
+                  onPressed: () => Navigator.pop(context, false),
+                ),
+              ],
+            ),
+          ),
+          if (_progress < 1.0)
+            LinearProgressIndicator(
+              value: _progress,
+              minHeight: 2,
+              backgroundColor: Colors.transparent,
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(Color(0xFF00B96B)),
+            ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.white.withValues(alpha: 0.04),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, size: 14, color: Colors.white54),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Complete the "Verify you are human" check below. It will continue automatically.',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: InAppWebView(
+              initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+              initialSettings: InAppWebViewSettings(
+                userAgent: ScrapeService.mobileUserAgent,
+                javaScriptEnabled: true,
+                domStorageEnabled: true,
+                thirdPartyCookiesEnabled: true,
+                supportZoom: true,
+              ),
+              onWebViewCreated: (c) => _webViewController = c,
+              onProgressChanged: (_, p) {
+                if (mounted) setState(() => _progress = p / 100);
+              },
+              onTitleChanged: (_, title) => _checkTitleForBypass(title),
+              onLoadStop: (controller, uri) async {
+                final title = await controller.getTitle();
+                _checkTitleForBypass(title);
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -58,21 +58,29 @@ class ScrapeService {
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final doc = dom.Document.html(response.body);
         final result = await adapter.extract(doc, uri);
+        if (result.needsVerification) {
+          return result;
+        }
         if (result.pages.length >= 2) {
           // Fast path succeeded!
           return result;
         }
 
         // If this was a series overview page, auto-hop to the first available chapter!
-        if (result.pages.isEmpty && result.availableChapters.isNotEmpty) {
-          final start = _pickStartingChapter(result.availableChapters, url);
-          if (start != null && start.url != url) {
-            final chRes = await scrapeChapter(start.url);
-            if (chRes.pages.length >= 2) {
-              return chRes.copyWith(
-                availableChapters: result.availableChapters,
-              );
-            }
+        final targetUrl = result.firstChapterUrl ??
+            (result.availableChapters.isNotEmpty
+                ? _pickStartingChapter(result.availableChapters, url)?.url
+                : null);
+
+        if (targetUrl != null && targetUrl != url) {
+          final chRes = await scrapeChapter(targetUrl);
+          if (chRes.pages.length >= 2 || chRes.needsVerification) {
+            return chRes.copyWith(
+              availableChapters: result.availableChapters.isNotEmpty
+                  ? result.availableChapters
+                  : chRes.availableChapters,
+              coverUrl: result.coverUrl ?? chRes.coverUrl,
+            );
           }
         }
       }
@@ -83,18 +91,26 @@ class ScrapeService {
     // --------------------------------- 2. Rendered Path (HeadlessInAppWebView)
     try {
       final rendered = await _scrapeHeadless(url, uri);
+      if (rendered.needsVerification) {
+        return rendered;
+      }
       if (rendered.pages.length >= 2) {
         return rendered;
       }
-      if (rendered.pages.isEmpty && rendered.availableChapters.isNotEmpty) {
-        final start = _pickStartingChapter(rendered.availableChapters, url);
-        if (start != null && start.url != url) {
-          final chRes = await scrapeChapter(start.url);
-          if (chRes.pages.length >= 2) {
-            return chRes.copyWith(
-              availableChapters: rendered.availableChapters,
-            );
-          }
+      final targetUrl = rendered.firstChapterUrl ??
+          (rendered.availableChapters.isNotEmpty
+              ? _pickStartingChapter(rendered.availableChapters, url)?.url
+              : null);
+
+      if (targetUrl != null && targetUrl != url) {
+        final chRes = await scrapeChapter(targetUrl);
+        if (chRes.pages.length >= 2 || chRes.needsVerification) {
+          return chRes.copyWith(
+            availableChapters: rendered.availableChapters.isNotEmpty
+                ? rendered.availableChapters
+                : chRes.availableChapters,
+            coverUrl: rendered.coverUrl ?? chRes.coverUrl,
+          );
         }
       }
     } catch (_) {}

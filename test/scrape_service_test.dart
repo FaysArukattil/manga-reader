@@ -146,5 +146,63 @@ void main() {
       expect(result.nextChapterUrl, equals('https://example.com/ch-6'));
       expect(result.prevChapterUrl, equals('https://example.com/ch-4'));
     });
+
+    test('GenericSiteAdapter detects Cloudflare and Turnstile verification challenges',
+        () async {
+      const adapter = GenericSiteAdapter();
+      const html = '''
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Just a moment...</title>
+        </head>
+        <body>
+          <div id="cf-turnstile"></div>
+          <p>Checking your browser before accessing the website.</p>
+        </body>
+      </html>
+      ''';
+
+      final doc = dom.Document.html(html);
+      final uri = Uri.parse('https://manga-secure.com/chapter-1');
+
+      final result = await adapter.extract(doc, uri);
+
+      expect(result.needsVerification, isTrue);
+      expect(result.verificationUrl, equals('https://manga-secure.com/chapter-1'));
+    });
+
+    test('GenericSiteAdapter extracts book cover and Start Reading button from overview page',
+        () async {
+      const adapter = GenericSiteAdapter();
+      const html = '''
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>One Piece - Read Manga</title>
+          <meta property="og:image" content="https://cdn.example.com/one-piece-cover.jpg" />
+        </head>
+        <body>
+          <div class="manga-poster">
+            <img src="https://cdn.example.com/one-piece-cover.jpg" alt="One Piece Cover" />
+          </div>
+          <a class="read-now" href="/manga/one-piece/chapter-1">Start Reading</a>
+          <div class="chapters">
+            <a href="/manga/one-piece/chapter-1">Chapter 1</a>
+            <a href="/manga/one-piece/chapter-2">Chapter 2</a>
+          </div>
+        </body>
+      </html>
+      ''';
+
+      final doc = dom.Document.html(html);
+      final uri = Uri.parse('https://example.com/manga/one-piece');
+
+      final result = await adapter.extract(doc, uri);
+
+      expect(result.coverUrl, equals('https://cdn.example.com/one-piece-cover.jpg'));
+      expect(result.firstChapterUrl, equals('https://example.com/manga/one-piece/chapter-1'));
+      expect(result.availableChapters.length, equals(2));
+    });
   });
 }

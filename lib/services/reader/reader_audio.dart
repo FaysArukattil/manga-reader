@@ -32,9 +32,9 @@ class ReaderAudio {
       // Stop previous in case user is swiping quickly
       await _player?.stop();
       await _player?.play(
-        AssetSource('audio/page_flip.wav'),
+        AssetSource('audio/page_flip.mp3'),
         mode: PlayerMode.lowLatency,
-        volume: 0.45,
+        volume: 0.65,
       );
     } catch (_) {
       // Audio playback should never crash the reader
