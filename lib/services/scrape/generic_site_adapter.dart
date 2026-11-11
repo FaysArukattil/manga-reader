@@ -85,7 +85,17 @@ class GenericSiteAdapter implements SiteAdapter {
     // 2. Check for "Start Reading" button on overview pages
     final startReadingUrl = _findStartReadingLink(document, pageUri);
 
-    // 3. Find reader container or largest image cluster
+    final pages = <String>[];
+    final seen = <String>{};
+
+    void addPage(String url) {
+      if (!seen.contains(url)) {
+        seen.add(url);
+        pages.add(url);
+      }
+    }
+
+    // 3. Find reader container with at least 2 images
     dom.Element? readerContainer;
     for (final sel in _readerSelectors) {
       final el = document.querySelector(sel);
@@ -95,17 +105,47 @@ class GenericSiteAdapter implements SiteAdapter {
       }
     }
 
-    final List<dom.Element> imgElements = [];
     if (readerContainer != null) {
-      imgElements.addAll(readerContainer.querySelectorAll('img'));
-    } else {
-      // ONLY gather images if inside a content container with at least 4+ images
-      // (prevents treating 1-2 random thumbnails/recommendations on homepages as chapters)
+      final imgElements = <dom.Element>[...readerContainer.querySelectorAll('img')];
+      // Also parse <noscript> tags inside reader container if images were hidden for noscript
+      for (final noscript in readerContainer.querySelectorAll('noscript')) {
+        final raw = noscript.text;
+        if (raw.contains('<img')) {
+          try {
+            final temp = dom.Document.html(raw);
+            imgElements.addAll(temp.querySelectorAll('img'));
+          } catch (_) {}
+        }
+      }
+      for (final img in imgElements) {
+        final resolved = _extractImgSrc(img, pageUri);
+        if (resolved != null && !_isJunk(resolved, img)) {
+          addPage(resolved);
+        }
+      }
+    }
+
+    // 4. If reader container wasn't found or has < 2 images, check embedded scripts
+    // (Crucial for WordPress TsManga themes like Thunderscans, dynamic JSON readers, etc.)
+    if (pages.length < 2) {
+      final scriptPages = _extractPagesFromScripts(document, pageUri);
+      for (final sp in scriptPages) {
+        addPage(sp);
+      }
+    }
+
+    // 5. Fallback: If still < 2 pages, look for image cluster in main content containers,
+    // explicitly excluding sidebars, widgets, recommendation sections, comments, etc.
+    if (pages.length < 2) {
       final contentDivs =
           document.querySelectorAll('div, section, article, main');
       dom.Element? bestCluster;
       int maxCount = 0;
       for (final el in contentDivs) {
+        final cls = (el.attributes['class'] ?? '').toLowerCase();
+        final id = (el.attributes['id'] ?? '').toLowerCase();
+        if (_isExcludedContainer(cls, id)) continue;
+
         final count = el.querySelectorAll('img').length;
         if (count >= 4 && count > maxCount) {
           maxCount = count;
@@ -113,83 +153,25 @@ class GenericSiteAdapter implements SiteAdapter {
         }
       }
       if (bestCluster != null) {
-        imgElements.addAll(bestCluster.querySelectorAll('img'));
-      }
-    }
-
-    // Also parse <noscript> tags inside reader container if images were hidden for noscript
-    for (final noscript in document.querySelectorAll('noscript')) {
-      final raw = noscript.text;
-      if (raw.contains('<img')) {
-        try {
-          final temp = dom.Document.html(raw);
-          imgElements.addAll(temp.querySelectorAll('img'));
-        } catch (_) {}
-      }
-    }
-
-    final pages = <String>[];
-    final seen = <String>{};
-
-    for (final img in imgElements) {
-      String? rawSrc = img.attributes['data-src'] ??
-          img.attributes['data-lazy-src'] ??
-          img.attributes['data-original'] ??
-          img.attributes['data-cfsrc'] ??
-          img.attributes['data-url'] ??
-          img.attributes['data-cdn'] ??
-          img.attributes['data-full-url'] ??
-          img.attributes['data-echo'] ??
-          img.attributes['data-actualsrc'] ??
-          img.attributes['data-page-url'] ??
-          img.attributes['data-image'] ??
-          img.attributes['data-img-src'] ??
-          img.attributes['src'];
-
-      if (rawSrc == null || rawSrc.trim().isEmpty) {
-        // Try srcset
-        final srcset = img.attributes['srcset'];
-        if (srcset != null && srcset.isNotEmpty) {
-          rawSrc = srcset.split(',').last.trim().split(' ').first;
-        }
-      }
-
-      if (rawSrc == null || rawSrc.trim().isEmpty) continue;
-      rawSrc = rawSrc.trim();
-
-      // Resolve relative and protocol-relative URLs
-      final resolved = _resolveUrl(rawSrc, pageUri);
-      if (resolved == null) continue;
-
-      if (_isJunk(resolved, img)) continue;
-
-      if (!seen.contains(resolved)) {
-        seen.add(resolved);
-        pages.add(resolved);
-      }
-    }
-
-    // 2. If < 2 pages found in DOM, extract from embedded JavaScript/JSON
-    if (pages.length < 2) {
-      final scriptPages = _extractPagesFromScripts(document, pageUri);
-      for (final sp in scriptPages) {
-        if (!seen.contains(sp)) {
-          seen.add(sp);
-          pages.add(sp);
+        for (final img in bestCluster.querySelectorAll('img')) {
+          final resolved = _extractImgSrc(img, pageUri);
+          if (resolved != null && !_isJunk(resolved, img)) {
+            addPage(resolved);
+          }
         }
       }
     }
 
-    // 3. Extract full chapter catalogue
+    // 6. Extract full chapter catalogue
     final catalogue = _extractChapterCatalogue(document, pageUri);
 
-    // 4. Discover Next & Prev Chapter URLs
+    // 7. Discover Next & Prev Chapter URLs
     final nextUrl = _findNavigationLink(document, pageUri, isNext: true) ??
         _findCatalogueNeighbor(catalogue, pageUri.toString(), isNext: true);
     final prevUrl = _findNavigationLink(document, pageUri, isNext: false) ??
         _findCatalogueNeighbor(catalogue, pageUri.toString(), isNext: false);
 
-    // 5. Extract title and chapter label
+    // 8. Extract title and chapter label
     final title = _extractTitle(document);
     final chapterLabel = UrlTools.chapterLabel(pageUri.toString()) ??
         _extractChapterHeading(document);
@@ -207,6 +189,55 @@ class GenericSiteAdapter implements SiteAdapter {
       firstChapterUrl: startReadingUrl ??
           (catalogue.isNotEmpty ? catalogue.first.url : null),
     );
+  }
+
+  String? _extractImgSrc(dom.Element img, Uri pageUri) {
+    String? rawSrc = img.attributes['data-src'] ??
+        img.attributes['data-lazy-src'] ??
+        img.attributes['data-original'] ??
+        img.attributes['data-cfsrc'] ??
+        img.attributes['data-url'] ??
+        img.attributes['data-cdn'] ??
+        img.attributes['data-full-url'] ??
+        img.attributes['data-echo'] ??
+        img.attributes['data-actualsrc'] ??
+        img.attributes['data-page-url'] ??
+        img.attributes['data-image'] ??
+        img.attributes['data-img-src'] ??
+        img.attributes['src'];
+
+    if (rawSrc == null || rawSrc.trim().isEmpty) {
+      final srcset = img.attributes['srcset'];
+      if (srcset != null && srcset.isNotEmpty) {
+        rawSrc = srcset.split(',').last.trim().split(' ').first;
+      }
+    }
+
+    if (rawSrc == null || rawSrc.trim().isEmpty) return null;
+    return _resolveUrl(rawSrc.trim(), pageUri);
+  }
+
+  static bool _isExcludedContainer(String cls, String id) {
+    const excluded = [
+      'sidebar',
+      'widget',
+      'related',
+      'recommend',
+      'comment',
+      'footer',
+      'header',
+      'menu',
+      'nav',
+      'recent',
+      'popular',
+      'social',
+      'disqus',
+      'author',
+    ];
+    for (final ex in excluded) {
+      if (cls.contains(ex) || id.contains(ex)) return true;
+    }
+    return false;
   }
 
   String? _extractCover(dom.Document doc, Uri baseUri) {
@@ -333,21 +364,24 @@ class GenericSiteAdapter implements SiteAdapter {
       final text = script.text;
       if (text.isEmpty) continue;
 
+      // Normalize escaped slashes often found in JSON / JS variables: "\/" -> "/"
+      final unescapedText = text.replaceAll(r'\/', '/').replaceAll(r'\\/', '/');
+
       // A. TsManga pattern: ts_reader.run({ ... "images": ["https://...", ...] })
-      if (text.contains('ts_reader') ||
-          text.contains('"images":') ||
-          text.contains("'images':")) {
+      if (unescapedText.contains('ts_reader') ||
+          unescapedText.contains('"images":') ||
+          unescapedText.contains("'images':")) {
         final imgArrayMatch = RegExp(
           r'''["']images["']\s*:\s*\[(.*?)\]''',
           dotAll: true,
-        ).firstMatch(text);
+        ).firstMatch(unescapedText);
         if (imgArrayMatch != null) {
           final rawArray = imgArrayMatch.group(1) ?? '';
           final urlMatches =
-              RegExp(r'''["'](https?:\/\/[^"'\s]+)["']''').allMatches(rawArray);
+              RegExp(r'''["'](https?://[^"'\s]+)["']''').allMatches(rawArray);
           for (final m in urlMatches) {
-            final u = m.group(1)?.replaceAll(r'\/', '/');
-            if (u != null && !seen.contains(u)) {
+            final u = m.group(1);
+            if (u != null && !_isJunkUrl(u) && !seen.contains(u)) {
               seen.add(u);
               results.add(u);
             }
@@ -360,14 +394,14 @@ class GenericSiteAdapter implements SiteAdapter {
       final varMatch = RegExp(
         r'''(?:var|let|const)\s+(?:pages|images|chapter_preloaded_images|pData|imgList|imageList|cur_images)\s*=\s*\[(.*?)\]''',
         dotAll: true,
-      ).firstMatch(text);
+      ).firstMatch(unescapedText);
       if (varMatch != null) {
         final rawArray = varMatch.group(1) ?? '';
         final urlMatches =
-            RegExp(r'''["'](https?:\/\/[^"'\s]+)["']''').allMatches(rawArray);
+            RegExp(r'''["'](https?://[^"'\s]+)["']''').allMatches(rawArray);
         for (final m in urlMatches) {
-          final u = m.group(1)?.replaceAll(r'\/', '/');
-          if (u != null && !seen.contains(u)) {
+          final u = m.group(1);
+          if (u != null && !_isJunkUrl(u) && !seen.contains(u)) {
             seen.add(u);
             results.add(u);
           }
@@ -376,15 +410,15 @@ class GenericSiteAdapter implements SiteAdapter {
       }
 
       // C. Fallback: scan for any cluster of image URLs inside a script
-      if (text.contains('chapter') ||
-          text.contains('manga') ||
-          text.contains('reader')) {
+      if (unescapedText.contains('chapter') ||
+          unescapedText.contains('manga') ||
+          unescapedText.contains('reader')) {
         final anyImgMatches = RegExp(
-          r'''https?:\/\/[^"'\s<>]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s<>]*)?''',
+          r'''https?://[^"'\s<>]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s<>]*)?''',
           caseSensitive: false,
-        ).allMatches(text);
+        ).allMatches(unescapedText);
         for (final m in anyImgMatches) {
-          final u = m.group(0)?.replaceAll(r'\/', '/');
+          final u = m.group(0);
           if (u != null && !_isJunkUrl(u) && !seen.contains(u)) {
             seen.add(u);
             results.add(u);
@@ -561,6 +595,26 @@ class GenericSiteAdapter implements SiteAdapter {
     Uri baseUri, {
     required bool isNext,
   }) {
+    // 0. Check ts_reader or JSON navigation parameters: prevUrl / nextUrl
+    final navKey = isNext ? 'nextUrl' : 'prevUrl';
+    final rawHtml = doc.outerHtml;
+    final navMatch = RegExp(
+      '["\']$navKey["\']\\s*:\\s*["\']([^"\']+)["\']',
+      caseSensitive: false,
+    ).firstMatch(rawHtml);
+    if (navMatch != null) {
+      final raw =
+          navMatch.group(1)?.replaceAll(r'\/', '/').replaceAll(r'\\/', '/');
+      if (raw != null &&
+          raw.isNotEmpty &&
+          raw != 'false' &&
+          raw != 'null' &&
+          raw != '#') {
+        final res = _resolveUrl(raw.trim(), baseUri);
+        if (res != null && res != baseUri.toString()) return res;
+      }
+    }
+
     final rel = isNext ? 'next' : 'prev';
     // 1. Check <link rel="next|prev"> or <a rel="next|prev">
     final relEl = doc.querySelector('link[rel="$rel"]') ??

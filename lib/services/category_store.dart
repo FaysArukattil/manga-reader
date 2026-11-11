@@ -38,6 +38,9 @@ class CategoryStore {
   }
 
   static Future<List<String>> removeCategory(String name) async {
+    if (name.toLowerCase() == 'favorites' || name.toLowerCase() == 'favourite') {
+      return getCategories();
+    }
     final current = await getCategories();
     current.remove(name);
     await saveCategories(current);
@@ -46,6 +49,9 @@ class CategoryStore {
 
   static Future<List<String>> renameCategory(
       String oldName, String newName) async {
+    if (oldName.toLowerCase() == 'favorites' || oldName.toLowerCase() == 'favourite') {
+      return getCategories();
+    }
     final clean = newName.trim();
     if (clean.isEmpty) return getCategories();
     final current = await getCategories();

@@ -947,32 +947,43 @@ class _StreamPagerState extends State<_StreamPager> {
             onPrevPage: () => _go(-1),
           ),
         ),
-        // Barely visible chapter seam marker
-        if (isFirstInChapter)
+        // Chapter seam marker / popup indicator (positioned below camera/notch)
+        if (isFirstInChapter && item.chapterLabel.isNotEmpty)
           Positioned(
-            top: 16,
+            top: (MediaQuery.paddingOf(context).top > 0
+                    ? MediaQuery.paddingOf(context).top
+                    : 24.0) +
+                16.0,
             left: 0,
             right: 0,
             child: Center(
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 6,
+                  horizontal: 16,
+                  vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(14),
+                  color: Colors.black.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: Colors.white12,
-                    width: 0.5,
+                    color: Colors.white.withValues(alpha: 0.15),
+                    width: 0.8,
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
                 ),
                 child: Text(
                   item.chapterLabel,
                   style: const TextStyle(
-                    color: Color(0xFF00B96B),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF00FFA3),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
                   ),
                 ),
               ),

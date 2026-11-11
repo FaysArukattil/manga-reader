@@ -204,5 +204,56 @@ void main() {
       expect(result.firstChapterUrl, equals('https://example.com/manga/one-piece/chapter-1'));
       expect(result.availableChapters.length, equals(2));
     });
+
+    test('extracts images from WordPress ts_reader with JSON escaped slashes and ignores sidebar recommendations',
+        () async {
+      const adapter = GenericSiteAdapter();
+      const html = r'''
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>The Second Eunuch Regains His Manhood Chapter 103 &#8211; Thunderscans EN</title>
+        </head>
+        <body>
+          <div id="readerarea"></div>
+          <aside class="sidebar-widget">
+            <div class="widget-post">
+              <img src="https://en-thunderscans.com/wp-content/uploads/rec1.jpg" />
+              <img src="https://en-thunderscans.com/wp-content/uploads/rec2.jpg" />
+              <img src="https://en-thunderscans.com/wp-content/uploads/rec3.jpg" />
+              <img src="https://en-thunderscans.com/wp-content/uploads/rec4.jpg" />
+              <img src="https://en-thunderscans.com/wp-content/uploads/rec5.jpg" />
+            </div>
+          </aside>
+          <script>
+            ts_reader.run({
+              "prevUrl": "https:\/\/en-thunderscans.com\/the-second-eunuch-regains-his-manhood-chapter-102\/",
+              "nextUrl": "https:\/\/en-thunderscans.com\/the-second-eunuch-regains-his-manhood-chapter-104\/",
+              "sources": [{
+                "source": "Default",
+                "images": [
+                  "https:\/\/en-thunderscans.com\/wp-content\/uploads\/manga\/0001.webp",
+                  "https:\/\/en-thunderscans.com\/wp-content\/uploads\/manga\/0002.webp",
+                  "https:\/\/en-thunderscans.com\/wp-content\/uploads\/manga\/0003.webp"
+                ]
+              }]
+            });
+          </script>
+        </body>
+      </html>
+      ''';
+
+      final doc = dom.Document.html(html);
+      final uri = Uri.parse('https://en-thunderscans.com/the-second-eunuch-regains-his-manhood-chapter-103/');
+
+      final result = await adapter.extract(doc, uri);
+
+      expect(result.pages.length, equals(3));
+      expect(result.pages[0], equals('https://en-thunderscans.com/wp-content/uploads/manga/0001.webp'));
+      expect(result.pages[1], equals('https://en-thunderscans.com/wp-content/uploads/manga/0002.webp'));
+      expect(result.pages[2], equals('https://en-thunderscans.com/wp-content/uploads/manga/0003.webp'));
+      expect(result.nextChapterUrl, equals('https://en-thunderscans.com/the-second-eunuch-regains-his-manhood-chapter-104/'));
+      expect(result.prevChapterUrl, equals('https://en-thunderscans.com/the-second-eunuch-regains-his-manhood-chapter-102/'));
+    });
   });
 }

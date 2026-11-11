@@ -1,7 +1,9 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../blocs/library_bloc.dart';
 import '../models/series.dart';
 import '../services/page_cache.dart';
 import '../services/scrape/cf_session.dart';
@@ -137,6 +139,12 @@ class SeriesCard extends StatelessWidget {
                 ),
               ),
             ),
+            // Top-left one-tap favorite button
+            Positioned(
+              top: 8,
+              left: 8,
+              child: _FavoriteButton(series: series),
+            ),
             if (series.hasNew)
               const Positioned(
                 top: 10,
@@ -209,6 +217,84 @@ class _Pill extends StatelessWidget {
           fontSize: 10,
           fontWeight: accent ? FontWeight.w800 : FontWeight.w600,
           letterSpacing: accent ? 0.5 : 0,
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoriteButton extends StatelessWidget {
+  const _FavoriteButton({required this.series});
+
+  final Series series;
+
+  @override
+  Widget build(BuildContext context) {
+    final isFav = series.category?.toLowerCase() == 'favorites' ||
+        series.category?.toLowerCase() == 'favourite';
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        final newCategory = isFav ? 'Reading' : 'Favorites';
+        context.read<LibraryBloc>().add(
+              LibraryMoveSeriesRequested(series, newCategory),
+            );
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  isFav ? Icons.favorite_border_rounded : Icons.favorite_rounded,
+                  color: isFav ? Colors.white70 : Colors.redAccent,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  isFav
+                      ? 'Removed from Favorites'
+                      : 'Added to Favorites!',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            duration: const Duration(milliseconds: 1400),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: isFav
+              ? Colors.redAccent.withValues(alpha: 0.9)
+              : Colors.black.withValues(alpha: 0.45),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: isFav
+                ? Colors.redAccent
+                : Colors.white.withValues(alpha: 0.3),
+            width: 1.2,
+          ),
+          boxShadow: isFav
+              ? [
+                  BoxShadow(
+                    color: Colors.redAccent.withValues(alpha: 0.5),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          size: 15,
+          color: Colors.white,
         ),
       ),
     );

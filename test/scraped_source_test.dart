@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shelfmark/core/url_tools.dart';
 import 'package:shelfmark/services/reader/chapter_source.dart';
 import 'package:shelfmark/services/scrape/scrape_service.dart';
 import 'package:shelfmark/services/scrape/site_adapter.dart';
@@ -97,6 +98,21 @@ void main() {
       expect(
         () => source.refreshNextChapterId('https://x.com/ch-1'),
         throwsA(isA<VerificationRequiredException>()),
+      );
+    });
+
+    test('UrlTools.titleFromUrl cleanly extracts title from various URL slugs', () {
+      expect(
+        UrlTools.titleFromUrl('https://en-thunderscans.com/the-second-eunuch-regains-his-manhood-chapter-103/'),
+        equals('The Second Eunuch Regains His Manhood'),
+      );
+      expect(
+        UrlTools.titleFromUrl('https://www.mgeko.cc/reader/en/did-someone-force-you-to-become-chapter-58-eng-li/'),
+        equals('Did Someone Force You To Become'),
+      );
+      expect(
+        UrlTools.titleFromUrl('https://site.com/series/one-piece/chapter-1100'),
+        equals('One Piece'),
       );
     });
   });

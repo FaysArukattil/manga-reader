@@ -1,4 +1,4 @@
-import 'dart:ui' show ImageFilter;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
@@ -15,8 +15,8 @@ import '../services/share_service.dart';
 import '../services/thumbnail_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/components/pressable_scale.dart';
-import '../theme/components/shimmer_box.dart';
 import 'components/brand_logo.dart';
+import 'components/mini_book_loader.dart';
 import 'md_detail_page.dart';
 import 'series_card.dart';
 import 'series_form.dart';
@@ -34,6 +34,8 @@ class _LibraryPageState extends State<LibraryPage> {
   final _searchFocus = FocusNode();
   final _scroll = ScrollController();
   bool _fabExtended = true;
+  bool _isScrolled = false;
+  bool _showCompactSearch = false;
   late final ShareService _share;
 
   @override
@@ -67,6 +69,10 @@ class _LibraryPageState extends State<LibraryPage> {
       setState(() => _fabExtended = false);
     } else if (dir == ScrollDirection.forward && !_fabExtended) {
       setState(() => _fabExtended = true);
+    }
+    final scrolled = _scroll.offset > 40;
+    if (scrolled != _isScrolled) {
+      setState(() => _isScrolled = scrolled);
     }
   }
 
@@ -104,6 +110,8 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _openForm({Series? existing, String? url, String? title}) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final bloc = context.read<LibraryBloc>();
     final result = await showModalBottomSheet<SeriesFormResult>(
       context: context,
       isScrollControlled: true,
@@ -113,11 +121,20 @@ class _LibraryPageState extends State<LibraryPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) =>
-          SeriesForm(existing: existing, initialUrl: url, initialTitle: title),
+      builder: (_) => SeriesForm(
+        existing: existing,
+        initialUrl: url,
+        initialTitle: title,
+        availableCategories: bloc.state.categories,
+        initialCategory: bloc.state.categoryFilter,
+      ),
     );
     if (result == null || !mounted) return;
-    final bloc = context.read<LibraryBloc>();
+    if (result.category != null &&
+        result.category!.isNotEmpty &&
+        !bloc.state.categories.contains(result.category!)) {
+      bloc.add(LibraryCategoryAdded(result.category!));
+    }
     if (existing == null) {
       final series = Series.create(
         id: context.read<LibraryRepository>().newId(),
@@ -856,38 +873,12 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  Future<void> _deleteAccount() async {
-    final ok = await _showConfirmDialog(
-      title: 'Delete All Data?',
-      content:
-          'This will permanently delete your library, reading progress, and settings from this device and the cloud. This action cannot be undone.',
-      confirmLabel: 'Delete All Data',
-      isDestructive: true,
-      icon: Icons.warning_amber_rounded,
-    );
-    if (ok != true || !mounted) return;
-    final repo = context.read<LibraryRepository>();
-    final thumbs = context.read<ThumbnailStore>();
-    final auth = context.read<AuthBloc>();
-    _snack('Deleting account...');
-    try {
-      await repo.deleteAll().timeout(const Duration(seconds: 20));
-    } catch (_) {
-      if (mounted) {
-        _snack('Could not delete your data. Check your connection and retry.');
-      }
-      return;
-    }
-    await thumbs.clear();
-    auth.add(const AuthDeleteRequested());
-    final result = await auth.stream.firstWhere((s) => !s.busy);
-    if (mounted && result.error != null) _snack(result.error!);
-  }
   // ---------------------------------------------------------------------------
   // Category manager (themed)
   // ---------------------------------------------------------------------------
 
   void _showCategoryManagerSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
     final bloc = context.read<LibraryBloc>();
     final t = context.tokens;
     showModalBottomSheet<void>(
@@ -1081,12 +1072,13 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   /// The series most worth resuming: last one actually opened, else the first
-  /// "reading" entry, else whatever is on the shelf.
-  Series _pickHero(List<Series> all) {
+  /// "reading" entry, else whatever is on the shelf, or null if library is empty.
+  Series? _pickHero(List<Series> all) {
+    if (all.isEmpty) return null;
     final opened = all.where((s) => s.lastReadAt != null).toList()
       ..sort((a, b) => b.lastReadAt!.compareTo(a.lastReadAt!));
     if (opened.isNotEmpty) return opened.first;
-    final reading = all.where((s) => s.status == ReadStatus.reading);
+    final reading = all.where((s) => s.status == ReadStatus.reading).toList();
     return reading.isNotEmpty ? reading.first : all.first;
   }
 
@@ -1104,95 +1096,274 @@ class _LibraryPageState extends State<LibraryPage> {
   // Sections
   // ---------------------------------------------------------------------------
 
-  Widget _buildHeader(LibraryState state) {
-    final t = context.tokens;
+  Widget _buildTopPortion(LibraryState state) {
     final user = context.read<AuthBloc>().state.user;
-    final headline = state.all.isEmpty
-        ? 'Welcome to your shelf'
-        : "What's next to read?";
+    final topPadding = MediaQuery.paddingOf(context).top;
+    final hero = _pickHero(state.all);
+    final showContinue = hero != null &&
+        state.all.isNotEmpty &&
+        state.query.trim().isEmpty &&
+        state.categoryFilter == null;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
-      child: Row(
+    final displayName = user?.displayName?.trim();
+    final welcomeTitle = displayName != null && displayName.isNotEmpty
+        ? 'Welcome,\n$displayName!'
+        : 'Welcome\nto Shelfmark!';
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF031218), // deep status bar teal
+            Color(0xFF072430), // rich ambient teal
+            Color(0xFF0C3A4B), // vibrant cyan/teal luminous glow
+            Color(0xFF051C25), // deep base teal
+          ],
+          stops: [0.0, 0.30, 0.72, 1.0],
+        ),
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(32),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0C3A4B).withValues(alpha: 0.35),
+            blurRadius: 28,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.fromLTRB(20, topPadding + 10, 20, 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _greeting(),
-                  style: TextStyle(
-                    color: t.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 250),
-                  child: Text(
-                    headline,
-                    key: ValueKey(headline),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: t.textPrimary,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.6,
-                      height: 1.15,
+          // Top Row: Headline + Profile Avatar
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _greeting(),
+                      style: const TextStyle(
+                        color: Color(0xFF8BA5B5),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      welcomeTitle,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 27,
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                        letterSpacing: -0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      "What's next to read?",
+                      style: TextStyle(
+                        color: Color(0xFF8BA5B5),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Profile button / avatar
+              GestureDetector(
+                onTap: _showProfileSheet,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  padding: const EdgeInsets.all(2.5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF2C7D99).withValues(alpha: 0.7),
+                      width: 1.6,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF0C3A4B).withValues(alpha: 0.45),
+                        blurRadius: 10,
+                      ),
+                    ],
+                  ),
+                  child: CircleAvatar(
+                    backgroundColor: const Color(0xFF051C25),
+                    backgroundImage: user?.photoURL != null
+                        ? NetworkImage(user!.photoURL!)
+                        : null,
+                    child: user?.photoURL == null
+                        ? const Icon(Icons.person, size: 22, color: Colors.white70)
+                        : null,
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: _showProfileSheet,
-            child: Container(
-              width: 42,
-              height: 42,
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: t.accent, width: 1.5),
               ),
-              child: CircleAvatar(
-                backgroundColor: t.surfaceCard,
-                backgroundImage: user?.photoURL != null
-                    ? NetworkImage(user!.photoURL!)
-                    : null,
-                child: user?.photoURL == null
-                    ? Icon(Icons.person, size: 20, color: t.textSecondary)
-                    : null,
-              ),
-            ),
+            ],
           ),
+
+          // Continue Reading Card (if reading hero available)
+          if (showContinue) ...[
+            const SizedBox(height: 16),
+            _CompactContinueCard(
+              series: hero,
+              onTap: _open,
+            ),
+          ],
+
+          const SizedBox(height: 18),
+
+          // Search Bar & Circular Action Button
+          _buildTopSearchRow(state),
         ],
       ),
     );
   }
 
+  Widget _buildTopSearchRow(LibraryState state) {
+    final focused = _searchFocus.hasFocus;
+    final bloc = context.read<LibraryBloc>();
+
+    return Row(
+      children: [
+        Expanded(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            height: 48,
+            padding: const EdgeInsets.only(left: 16, right: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF031218).withValues(alpha: 0.75),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: focused
+                    ? const Color(0xFF38B2AC)
+                    : Colors.white.withValues(alpha: 0.12),
+                width: focused ? 1.4 : 1,
+              ),
+              boxShadow: focused
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF38B2AC).withValues(alpha: 0.22),
+                        blurRadius: 12,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.search_rounded,
+                  size: 20,
+                  color: Color(0xFF7FA8B8),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _search,
+                    focusNode: _searchFocus,
+                    textInputAction: TextInputAction.search,
+                    style: const TextStyle(color: Colors.white, fontSize: 14.5),
+                    cursorColor: const Color(0xFF38B2AC),
+                    decoration: const InputDecoration(
+                      hintText: 'Search title, author, genre...',
+                      hintStyle: TextStyle(
+                        color: Color(0xFF6B8A99),
+                        fontSize: 14,
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                    onChanged: (v) {
+                      bloc.add(LibraryQueryChanged(v));
+                      setState(() {});
+                    },
+                  ),
+                ),
+                if (_search.text.isNotEmpty)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
+                    onPressed: () {
+                      _search.clear();
+                      bloc.add(const LibraryQueryChanged(''));
+                      setState(() {});
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        // Circular search / filter action button
+        Tooltip(
+          message: 'Sort: ${_sortShortLabel(state.sort)}',
+          child: GestureDetector(
+            onTap: () => _showSortAndFilterSheet(state),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF144658),
+                border: Border.all(
+                  color: state.sort != LibrarySort.lastRead
+                      ? const Color(0xFF38B2AC)
+                      : const Color(0xFF2C7D99).withValues(alpha: 0.5),
+                  width: 1.4,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0C3A4B).withValues(alpha: 0.45),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.tune_rounded,
+                color: state.sort != LibrarySort.lastRead
+                    ? const Color(0xFF38B2AC)
+                    : Colors.white,
+                size: 21,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _showProfileSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
     final t = context.tokens;
     final user = context.read<AuthBloc>().state.user;
     final bloc = context.read<LibraryBloc>();
     final all = bloc.state.all;
-    final readingCount =
-        all.where((s) => s.status == ReadStatus.reading).length;
-    final completedCount =
-        all.where((s) => s.status == ReadStatus.completed).length;
 
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       backgroundColor: t.surface,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1234,37 +1405,54 @@ class _LibraryPageState extends State<LibraryPage> {
                 style: TextStyle(color: t.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: _ProfileStatCard(
-                      label: 'Total Books',
-                      value: '${all.length}',
-                      icon: Icons.auto_stories_rounded,
-                      color: t.accent,
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                decoration: BoxDecoration(
+                  color: t.surfaceCard,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: t.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: t.accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(Icons.auto_stories_rounded, color: t.accent, size: 22),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _ProfileStatCard(
-                      label: 'Reading',
-                      value: '$readingCount',
-                      icon: Icons.menu_book_rounded,
-                      color: Colors.blueAccent,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Total Books Added',
+                            style: TextStyle(
+                              color: t.textSecondary,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${all.length} ${all.length == 1 ? "manga" : "manga series"}',
+                            style: TextStyle(
+                              color: t.textPrimary,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _ProfileStatCard(
-                      label: 'Completed',
-                      value: '$completedCount',
-                      icon: Icons.check_circle_outline_rounded,
-                      color: Colors.purpleAccent,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               _SheetActionTile(
                 icon: Icons.logout_rounded,
                 iconColor: t.textPrimary,
@@ -1275,18 +1463,6 @@ class _LibraryPageState extends State<LibraryPage> {
                   context.read<AuthBloc>().add(const AuthSignOutRequested());
                 },
               ),
-              const SizedBox(height: 8),
-              _SheetActionTile(
-                icon: Icons.delete_outline_rounded,
-                iconColor: Colors.redAccent,
-                title: 'Delete All Data',
-                subtitle: 'Permanently remove library and cloud sync',
-                destructive: true,
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _deleteAccount();
-                },
-              ),
             ],
           ),
         ),
@@ -1294,51 +1470,178 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  /// Search + sort + category chips in ONE pinned block, so filtering is always
-  /// one thumb-reach away instead of scrolling past three stacked sections.
-  Widget _buildStickyControls(LibraryState state) {
+  /// Category chips in a pinned block with "Categories" header (matching reference design).
+  Widget _buildStickyControls(LibraryState state, {required bool needsTopPad}) {
+    final t = context.tokens;
+    final bloc = context.read<LibraryBloc>();
+    final isHomeAll = state.categoryFilter == null && state.query.trim().isEmpty;
+    final topPadding = MediaQuery.paddingOf(context).top;
+
+    final chips = _WaterBubbleCategoryBar(
+      categories: [null, ...state.categories],
+      selected: state.categoryFilter,
+      onSelect: (cat) => bloc.add(LibraryCategoryFilterChanged(cat)),
+      onManage: _showCategoryManagerSheet,
+      onLongPress: (cat) => _showCategoryOptions(cat),
+    );
+
+    return Container(
+      color: t.bg,
+      padding: EdgeInsets.only(
+        top: needsTopPad ? (topPadding + 6) : 6,
+        bottom: 8,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Categories Header Row (matches reference design: "Categories" + "See All >")
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 2, 16, 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Categories',
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!isHomeAll) ...[
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _showCompactSearch = !_showCompactSearch;
+                            if (_showCompactSearch) {
+                              _searchFocus.requestFocus();
+                            }
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _showCompactSearch || _search.text.isNotEmpty
+                                ? t.accent.withValues(alpha: 0.2)
+                                : t.surfaceCard,
+                            border: Border.all(
+                              color: _showCompactSearch || _search.text.isNotEmpty
+                                  ? t.accent
+                                  : t.border,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.search_rounded,
+                            size: 16,
+                            color: _showCompactSearch || _search.text.isNotEmpty
+                                ? t.accent
+                                : t.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => _showSortAndFilterSheet(state),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: state.sort != LibrarySort.lastRead
+                                ? t.accent.withValues(alpha: 0.2)
+                                : t.surfaceCard,
+                            border: Border.all(
+                              color: state.sort != LibrarySort.lastRead
+                                  ? t.accent
+                                  : t.border,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.tune_rounded,
+                            size: 16,
+                            color: state.sort != LibrarySort.lastRead
+                                ? t.accent
+                                : t.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    GestureDetector(
+                      onTap: _showCategoryManagerSheet,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                        child: Row(
+                          children: [
+                            Text(
+                              'See All',
+                              style: TextStyle(
+                                color: t.accent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(Icons.chevron_right_rounded, size: 16, color: t.accent),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Inline search field when searching on a category view
+          if (!isHomeAll && (_showCompactSearch || _search.text.isNotEmpty))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: _buildCompactSearchField(state),
+            ),
+
+          // Liquid Water Bubble Category Pills
+          chips,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactSearchField(LibraryState state) {
     final t = context.tokens;
     final bloc = context.read<LibraryBloc>();
     final focused = _searchFocus.hasFocus;
 
-    final search = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      height: 46,
+    return Container(
+      height: 44,
       padding: const EdgeInsets.only(left: 14, right: 6),
       decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(23),
+        color: t.surfaceCard,
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: focused ? t.accent.withValues(alpha: 0.7) : t.border,
+          color: focused ? t.accent : t.border,
           width: focused ? 1.4 : 1,
         ),
-        boxShadow: focused
-            ? [
-                BoxShadow(
-                  color: t.accent.withValues(alpha: 0.18),
-                  blurRadius: 14,
-                ),
-              ]
-            : null,
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.search_rounded,
-            size: 20,
-            color: focused ? t.accent : t.textTertiary,
-          ),
+          Icon(Icons.search_rounded, size: 18, color: focused ? t.accent : t.textTertiary),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: _search,
               focusNode: _searchFocus,
               textInputAction: TextInputAction.search,
-              style: TextStyle(color: t.textPrimary, fontSize: 14.5),
+              style: TextStyle(color: t.textPrimary, fontSize: 13.5),
               cursorColor: t.accent,
               decoration: InputDecoration(
-                hintText: 'Search your shelf',
-                hintStyle: TextStyle(color: t.textTertiary, fontSize: 14.5),
+                hintText: 'Search in ${state.categoryFilter ?? "shelf"}...',
+                hintStyle: TextStyle(color: t.textTertiary, fontSize: 13.5),
                 border: InputBorder.none,
                 isDense: true,
               ),
@@ -1351,7 +1654,7 @@ class _LibraryPageState extends State<LibraryPage> {
           if (_search.text.isNotEmpty)
             IconButton(
               visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.close_rounded, size: 18, color: t.textSecondary),
+              icon: Icon(Icons.close_rounded, size: 16, color: t.textSecondary),
               onPressed: () {
                 _search.clear();
                 bloc.add(const LibraryQueryChanged(''));
@@ -1361,97 +1664,162 @@ class _LibraryPageState extends State<LibraryPage> {
         ],
       ),
     );
+  }
 
-    final sort = PopupMenuButton<LibrarySort>(
-      tooltip: 'Sort',
-      color: t.surfaceCard,
-      offset: const Offset(0, 48),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: t.border),
-      ),
-      initialValue: state.sort,
-      onSelected: (v) => bloc.add(LibrarySortChanged(v)),
-      itemBuilder: (_) => [
-        for (final entry in const {
-          LibrarySort.lastRead: 'Last read',
-          LibrarySort.title: 'Title A–Z',
-          LibrarySort.added: 'Recently added',
-        }.entries)
-          PopupMenuItem(
-            value: entry.key,
-            child: Row(
-              children: [
-                Icon(
-                  Icons.check_rounded,
-                  size: 18,
-                  color: state.sort == entry.key
-                      ? t.accent
-                      : Colors.transparent,
-                ),
-                const SizedBox(width: 8),
-                Text(entry.value, style: TextStyle(color: t.textPrimary)),
-              ],
-            ),
-          ),
-      ],
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color: t.surface,
-          shape: BoxShape.circle,
-          border: Border.all(color: t.border),
-        ),
-        child: Icon(Icons.swap_vert_rounded, size: 22, color: t.textSecondary),
-      ),
-    );
+  static String _sortShortLabel(LibrarySort sort) {
+    switch (sort) {
+      case LibrarySort.lastRead:
+        return 'Recent';
+      case LibrarySort.title:
+        return 'A–Z';
+      case LibrarySort.added:
+        return 'Added';
+    }
+  }
 
-    final chips = SizedBox(
-      height: 36,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          _CategoryChip(
-            label: 'All',
-            selected: state.categoryFilter == null,
-            onTap: () => bloc.add(const LibraryCategoryFilterChanged(null)),
-          ),
-          for (final cat in state.categories)
-            _CategoryChip(
-              label: cat,
-              selected: state.categoryFilter == cat,
-              onTap: () => bloc.add(LibraryCategoryFilterChanged(cat)),
-              onLongPress: () => _showCategoryOptions(cat),
-            ),
-          _CategoryChip(
-            icon: Icons.tune_rounded,
-            label: 'Manage',
-            selected: false,
-            onTap: _showCategoryManagerSheet,
-          ),
-        ],
-      ),
-    );
+  void _showSortAndFilterSheet(LibraryState state) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final t = context.tokens;
+    final bloc = context.read<LibraryBloc>();
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-          child: Row(
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: search),
-              const SizedBox(width: 10),
-              sort,
+              Text(
+                'Sort Library',
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose how manga series appear on your shelf.',
+                style: TextStyle(color: t.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              _buildSortOptionCard(
+                t: t,
+                label: 'Last Read',
+                description: 'Recently read chapters appear first',
+                icon: Icons.history_rounded,
+                selected: state.sort == LibrarySort.lastRead,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  bloc.add(const LibrarySortChanged(LibrarySort.lastRead));
+                },
+              ),
+              const SizedBox(height: 10),
+              _buildSortOptionCard(
+                t: t,
+                label: 'Title A–Z',
+                description: 'Organize series alphabetically by title',
+                icon: Icons.sort_by_alpha_rounded,
+                selected: state.sort == LibrarySort.title,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  bloc.add(const LibrarySortChanged(LibrarySort.title));
+                },
+              ),
+              const SizedBox(height: 10),
+              _buildSortOptionCard(
+                t: t,
+                label: 'Recently Added',
+                description: 'New additions appear at the top',
+                icon: Icons.calendar_today_rounded,
+                selected: state.sort == LibrarySort.added,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  bloc.add(const LibrarySortChanged(LibrarySort.added));
+                },
+              ),
             ],
           ),
         ),
-        chips,
-        const SizedBox(height: 10),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildSortOptionCard({
+    required AppThemeTokens t,
+    required String label,
+    required String description,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected ? t.accent.withValues(alpha: 0.12) : t.surfaceCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? t.accent : t.border,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: selected
+                    ? t.accent.withValues(alpha: 0.2)
+                    : t.surface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: selected ? t.accent : t.textSecondary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? t.textPrimary : t.textSecondary,
+                      fontSize: 14.5,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    description,
+                    style: TextStyle(color: t.textTertiary, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_circle_rounded, color: t.accent, size: 20),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1501,19 +1869,27 @@ class _LibraryPageState extends State<LibraryPage> {
     final t = context.tokens;
     final bloc = context.read<LibraryBloc>();
 
-    return Scaffold(
-      backgroundColor: t.bg,
-      body: SafeArea(
-        bottom: false,
-        child: BlocBuilder<LibraryBloc, LibraryState>(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        backgroundColor: t.bg,
+        resizeToAvoidBottomInset: false,
+        body: BlocBuilder<LibraryBloc, LibraryState>(
           builder: (context, state) {
             final width = MediaQuery.sizeOf(context).width;
             final columns = (width / 170).floor().clamp(2, 6);
             final hasShelf = state.all.isNotEmpty;
-            final showHighlights = !state.loading &&
-                hasShelf &&
-                state.query.trim().isEmpty &&
-                state.categoryFilter == null;
+            final isHomeAll = state.categoryFilter == null && state.query.trim().isEmpty;
+            final topPadding = MediaQuery.paddingOf(context).top;
+            final needsTopPad = _isScrolled || !isHomeAll;
+            final hasActiveCompactSearch = !isHomeAll && (_showCompactSearch || state.query.isNotEmpty);
+            final controlsHeight = (needsTopPad ? (topPadding + 6.0) : 6.0) +
+                32.0 + 10.0 + 40.0 + 8.0 +
+                (hasActiveCompactSearch ? 54.0 : 0.0);
 
             final gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
@@ -1531,6 +1907,11 @@ class _LibraryPageState extends State<LibraryPage> {
               },
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  if (_searchFocus.hasFocus) {
+                    _searchFocus.unfocus();
+                  }
+                },
                 onHorizontalDragEnd: (details) {
                   final v = details.primaryVelocity ?? 0;
                   if (v.abs() < 240) return;
@@ -1547,45 +1928,48 @@ class _LibraryPageState extends State<LibraryPage> {
                 },
                 child: CustomScrollView(
                   controller: _scroll,
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
                   ),
                   slivers: [
                     SliverToBoxAdapter(
-                      child: _buildHeader(state),
-                    ),
-                    if (showHighlights)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
-                          child: _ContinueHero(
-                            series: _pickHero(state.all),
-                            onTap: _open,
-                          ),
-                        ),
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 320),
+                        curve: Curves.easeInOutCubic,
+                        child: isHomeAll
+                            ? _buildTopPortion(state)
+                            : const SizedBox.shrink(),
                       ),
+                    ),
                     if (hasShelf)
                       SliverPersistentHeader(
                         pinned: true,
                         delegate: _PinnedBarDelegate(
-                          height: 4 + 46 + 10 + 36 + 10,
+                          height: controlsHeight,
                           background: t.bg,
-                          child: _buildStickyControls(state),
+                          child: _buildStickyControls(state, needsTopPad: needsTopPad),
                         ),
                       ),
                     if (hasShelf) SliverToBoxAdapter(child: _buildShelfTitle(state)),
                     if (state.loading)
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                        sliver: SliverGrid(
-                          gridDelegate: gridDelegate,
-                          delegate: SliverChildBuilderDelegate(
-                            (_, __) => const ShimmerBox(
-                              width: double.infinity,
-                              height: double.infinity,
-                              borderRadius: 18,
-                            ),
-                            childCount: 6,
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              MiniBookLoader(size: 42),
+                              SizedBox(height: 14),
+                              Text(
+                                'Loading your shelf...',
+                                style: TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       )
@@ -1599,14 +1983,19 @@ class _LibraryPageState extends State<LibraryPage> {
                       )
                     else
                       SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          120 + MediaQuery.paddingOf(context).bottom,
+                        ),
                         sliver: SliverGrid(
                           gridDelegate: gridDelegate,
                           delegate: SliverChildBuilderDelegate(
                             (context, i) {
                               final s = state.visible[i];
                               return _AnimatedGridTile(
-                                key: ValueKey('tile_${s.id}'),
+                                key: ValueKey('tile_${s.id}_${state.categoryFilter}_${state.sort}'),
                                 index: i,
                                 child: SeriesCard(
                                   key: ValueKey(s.id),
@@ -1626,8 +2015,7 @@ class _LibraryPageState extends State<LibraryPage> {
             );
           },
         ),
-      ),
-      floatingActionButton: PressableScale(
+        floatingActionButton: PressableScale(
         onTap: () {
           HapticFeedback.lightImpact();
           _openForm();
@@ -1684,159 +2072,14 @@ class _LibraryPageState extends State<LibraryPage> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 // =============================================================================
 // Pieces
 // =============================================================================
-
-/// Big "Continue reading" card: blurred cover backdrop, sharp cover thumb,
-/// one obvious Resume action. This is the single most important element on the
-/// screen, so it gets the most visual weight.
-class _ContinueHero extends StatelessWidget {
-  const _ContinueHero({required this.series, required this.onTap});
-
-  final Series series;
-  final void Function(Series) onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    final resume = series.resumeLabel;
-
-    return PressableScale(
-      onTap: () => onTap(series),
-      scaleDown: 0.98,
-      child: Container(
-        height: 168,
-        decoration: BoxDecoration(
-          color: t.surfaceCard,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-              child: Transform.scale(
-                scale: 1.3,
-                child: SeriesCover(series: series, memCacheWidth: 300),
-              ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.55),
-                    Colors.black.withValues(alpha: 0.78),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  AspectRatio(
-                    aspectRatio: 0.68,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: SeriesCover(series: series, memCacheWidth: 360),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'CONTINUE READING',
-                          style: TextStyle(
-                            color: t.accent,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          series.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                            height: 1.18,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          resume.isNotEmpty ? resume : series.host,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 9,
-                          ),
-                          decoration: BoxDecoration(
-                            color: t.accent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.play_arrow_rounded,
-                                size: 18,
-                                color: Color(0xFF04130C),
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                'Resume',
-                                style: TextStyle(
-                                  color: Color(0xFF04130C),
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _SheetActionTile extends StatelessWidget {
   const _SheetActionTile({
@@ -1917,52 +2160,6 @@ class _SheetActionTile extends StatelessWidget {
   }
 }
 
-class _ProfileStatCard extends StatelessWidget {
-  const _ProfileStatCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-      decoration: BoxDecoration(
-        color: t.surfaceCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.border),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, size: 20, color: color),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              color: t.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(color: t.textSecondary, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _CountBadge extends StatelessWidget {
   const _CountBadge({required this.count});
 
@@ -1989,63 +2186,321 @@ class _CountBadge extends StatelessWidget {
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({
-    required this.label,
-    required this.selected,
+class _CompactContinueCard extends StatelessWidget {
+  const _CompactContinueCard({
+    required this.series,
     required this.onTap,
-    this.onLongPress,
-    this.icon,
   });
 
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final VoidCallback? onLongPress;
-  final IconData? icon;
+  final Series series;
+  final void Function(Series) onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final fg = selected ? const Color(0xFF04130C) : t.textSecondary;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onTap();
-        },
-        onLongPress: onLongPress,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: selected ? t.accent : t.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: selected ? t.accent : t.border,
+    final resume = series.resumeLabel;
+
+    return PressableScale(
+      onTap: () => onTap(series),
+      scaleDown: 0.98,
+      child: Container(
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: t.surfaceCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.border.withValues(alpha: 0.8)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 15, color: fg),
-                const SizedBox(width: 5),
-              ],
-              Text(
-                label,
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 13,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+          ],
+        ),
+        child: Row(
+          children: [
+            // Thumbnail
+            AspectRatio(
+              aspectRatio: 0.72,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SeriesCover(series: series, memCacheWidth: 200),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Title & Progress
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: t.accent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'CONTINUE READING',
+                        style: TextStyle(
+                          color: t.accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    series.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: t.textPrimary,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    resume.isNotEmpty ? resume : series.host,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Mini Resume Button
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: t.accent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.play_arrow_rounded,
+                    size: 16,
+                    color: Color(0xFF04130C),
+                  ),
+                  SizedBox(width: 2),
+                  Text(
+                    'Resume',
+                    style: TextStyle(
+                      color: Color(0xFF04130C),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WaterBubbleCategoryBar extends StatefulWidget {
+  const _WaterBubbleCategoryBar({
+    required this.categories,
+    required this.selected,
+    required this.onSelect,
+    required this.onManage,
+    this.onLongPress,
+  });
+
+  final List<String?> categories;
+  final String? selected;
+  final ValueChanged<String?> onSelect;
+  final VoidCallback onManage;
+  final ValueChanged<String>? onLongPress;
+
+  @override
+  State<_WaterBubbleCategoryBar> createState() => _WaterBubbleCategoryBarState();
+}
+
+class _WaterBubbleCategoryBarState extends State<_WaterBubbleCategoryBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _morphController;
+
+  @override
+  void initState() {
+    super.initState();
+    _morphController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 360),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _WaterBubbleCategoryBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      _morphController.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _morphController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return SizedBox(
+      height: 38,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: widget.categories.length + 1, // +1 for Manage
+        itemBuilder: (context, index) {
+          if (index == widget.categories.length) {
+            return Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  widget.onManage();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: t.surfaceCard,
+                    borderRadius: BorderRadius.circular(19),
+                    border: Border.all(color: t.border),
+                  ),
+                  alignment: Alignment.center,
+                  child: Row(
+                    children: [
+                      Icon(Icons.tune_rounded, size: 14, color: t.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Manage',
+                        style: TextStyle(
+                          color: t.textSecondary,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
+            );
+          }
+
+          final cat = widget.categories[index];
+          final label = cat ?? 'All';
+          final isSelected = widget.selected == cat;
+          final isFav = cat?.toLowerCase() == 'favorites' || cat?.toLowerCase() == 'favourite';
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                widget.onSelect(cat);
+              },
+              onLongPress: cat != null && !isFav
+                  ? () => widget.onLongPress?.call(cat)
+                  : null,
+              child: AnimatedBuilder(
+                animation: _morphController,
+                builder: (context, child) {
+                  // Morphing water bubble scaling: when active, dynamically animates width & squish
+                  double scaleX = 1.0;
+                  double scaleY = 1.0;
+                  if (isSelected && _morphController.isAnimating) {
+                    final progress = _morphController.value;
+                    // Squish & stretch like a dividing liquid droplet
+                    scaleX = 1.0 + (math.sin(progress * math.pi) * 0.14);
+                    scaleY = 1.0 - (math.sin(progress * math.pi) * 0.08);
+                  }
+
+                  return Transform.scale(
+                    scaleX: scaleX,
+                    scaleY: scaleY,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? (isFav ? Colors.redAccent : t.accent)
+                            : t.surfaceCard,
+                        borderRadius: BorderRadius.circular(19),
+                        border: Border.all(
+                          color: isSelected
+                              ? (isFav ? Colors.redAccent : t.accent)
+                              : t.border,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: (isFav ? Colors.redAccent : t.accent)
+                                      .withValues(alpha: 0.35),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isFav) ...[
+                            Icon(
+                              isSelected
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 13,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.redAccent,
+                            ),
+                            const SizedBox(width: 5),
+                          ],
+                          Text(
+                            label,
+                            style: TextStyle(
+                              color: isSelected
+                                  ? (isFav ? Colors.white : const Color(0xFF04130C))
+                                  : t.textSecondary,
+                              fontSize: 13,
+                              fontWeight: isSelected
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        },
       ),
     );
   }

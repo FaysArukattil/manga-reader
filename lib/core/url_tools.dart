@@ -116,4 +116,38 @@ class UrlTools {
     out = out.replaceFirst(_trailingNoise, '');
     return out.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
+
+  /// Extracts a human-friendly manga title from a URL path slug.
+  /// E.g. "https://site.com/the-second-eunuch-regains-his-manhood-chapter-103/"
+  /// -> "The Second Eunuch Regains His Manhood"
+  static String titleFromUrl(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return '';
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segments.isEmpty) return '';
+
+    // Usually the last segment (or second to last if last is just "chapter-X") has the title
+    String candidate = segments.last;
+    if (_chapterOnly.hasMatch(candidate) && segments.length >= 2) {
+      candidate = segments[segments.length - 2];
+    }
+
+    // Strip trailing chapter/suffix info: "-chapter-103", "-eng-li", etc.
+    candidate = candidate.replaceAll(_chapterRe, '');
+    final suffixPattern = RegExp(
+      r'[-_](eng|en|raw|online|li|scan|scans|chapter|chap|ch|ep|episode|v\d+|s\d+)[-_0-9]*$',
+      caseSensitive: false,
+    );
+    while (suffixPattern.hasMatch(candidate)) {
+      candidate = candidate.replaceFirst(suffixPattern, '');
+    }
+    candidate = candidate.replaceAll(RegExp(r'[-_]+'), ' ').trim();
+    if (candidate.isEmpty) return '';
+
+    // Capitalize words
+    return candidate.split(' ').map((word) {
+      if (word.isEmpty) return '';
+      return word[0].toUpperCase() + word.substring(1).toLowerCase();
+    }).join(' ');
+  }
 }
