@@ -35,7 +35,6 @@ class _LibraryPageState extends State<LibraryPage> {
   final _scroll = ScrollController();
   bool _fabExtended = true;
   bool _isScrolled = false;
-  bool _showCompactSearch = false;
   late final ShareService _share;
 
   @override
@@ -1097,6 +1096,7 @@ class _LibraryPageState extends State<LibraryPage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildTopPortion(LibraryState state) {
+    final t = context.tokens;
     final user = context.read<AuthBloc>().state.user;
     final topPadding = MediaQuery.paddingOf(context).top;
     final hero = _pickHero(state.all);
@@ -1113,236 +1113,118 @@ class _LibraryPageState extends State<LibraryPage> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFF031218), // deep status bar teal
-            Color(0xFF072430), // rich ambient teal
-            Color(0xFF0C3A4B), // vibrant cyan/teal luminous glow
-            Color(0xFF051C25), // deep base teal
-          ],
-          stops: [0.0, 0.30, 0.72, 1.0],
-        ),
+        color: t.surface,
         borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(32),
+          bottom: Radius.circular(28),
+        ),
+        border: Border(
+          bottom: BorderSide(
+            color: t.border.withValues(alpha: 0.9),
+            width: 1.5,
+          ),
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0C3A4B).withValues(alpha: 0.35),
-            blurRadius: 28,
-            offset: const Offset(0, 10),
+            color: Colors.black.withValues(alpha: 0.55),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(20, topPadding + 10, 20, 22),
+      padding: EdgeInsets.fromLTRB(16, topPadding + 10, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           // Top Row: Headline + Profile Avatar
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _greeting(),
-                      style: const TextStyle(
-                        color: Color(0xFF8BA5B5),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _greeting(),
+                        style: TextStyle(
+                          color: t.textTertiary,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.3,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      welcomeTitle,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 27,
-                        fontWeight: FontWeight.w800,
-                        height: 1.15,
-                        letterSpacing: -0.6,
+                      const SizedBox(height: 2),
+                      Text(
+                        welcomeTitle,
+                        style: TextStyle(
+                          color: t.textPrimary,
+                          fontSize: 27,
+                          fontWeight: FontWeight.w800,
+                          height: 1.15,
+                          letterSpacing: -0.6,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      "What's next to read?",
-                      style: TextStyle(
-                        color: Color(0xFF8BA5B5),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              // Profile button / avatar
-              GestureDetector(
-                onTap: _showProfileSheet,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  padding: const EdgeInsets.all(2.5),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: const Color(0xFF2C7D99).withValues(alpha: 0.7),
-                      width: 1.6,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF0C3A4B).withValues(alpha: 0.45),
-                        blurRadius: 10,
+                      const SizedBox(height: 6),
+                      Text(
+                        "What's next to read?",
+                        style: TextStyle(
+                          color: t.textSecondary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
-                  child: CircleAvatar(
-                    backgroundColor: const Color(0xFF051C25),
-                    backgroundImage: user?.photoURL != null
-                        ? NetworkImage(user!.photoURL!)
-                        : null,
-                    child: user?.photoURL == null
-                        ? const Icon(Icons.person, size: 22, color: Colors.white70)
-                        : null,
+                ),
+                const SizedBox(width: 12),
+                // Profile button / avatar
+                GestureDetector(
+                  onTap: _showProfileSheet,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    padding: const EdgeInsets.all(2.5),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: t.accent.withValues(alpha: 0.7),
+                        width: 1.6,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: t.accent.withValues(alpha: 0.25),
+                          blurRadius: 10,
+                        ),
+                      ],
+                    ),
+                    child: CircleAvatar(
+                      backgroundColor: t.surfaceCard,
+                      backgroundImage: user?.photoURL != null
+                          ? NetworkImage(user!.photoURL!)
+                          : null,
+                      child: user?.photoURL == null
+                          ? Icon(Icons.person, size: 22, color: t.textSecondary)
+                          : null,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
 
-          // Continue Reading Card (if reading hero available)
+          // Continue Reading Card (expanded vertically and horizontally to the edge)
           if (showContinue) ...[
-            const SizedBox(height: 16),
-            _CompactContinueCard(
+            const SizedBox(height: 14),
+            _ExpandedContinueCard(
               series: hero,
               onTap: _open,
             ),
           ],
-
-          const SizedBox(height: 18),
-
-          // Search Bar & Circular Action Button
-          _buildTopSearchRow(state),
         ],
       ),
-    );
-  }
-
-  Widget _buildTopSearchRow(LibraryState state) {
-    final focused = _searchFocus.hasFocus;
-    final bloc = context.read<LibraryBloc>();
-
-    return Row(
-      children: [
-        Expanded(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            height: 48,
-            padding: const EdgeInsets.only(left: 16, right: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF031218).withValues(alpha: 0.75),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: focused
-                    ? const Color(0xFF38B2AC)
-                    : Colors.white.withValues(alpha: 0.12),
-                width: focused ? 1.4 : 1,
-              ),
-              boxShadow: focused
-                  ? [
-                      BoxShadow(
-                        color: const Color(0xFF38B2AC).withValues(alpha: 0.22),
-                        blurRadius: 12,
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.search_rounded,
-                  size: 20,
-                  color: Color(0xFF7FA8B8),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _search,
-                    focusNode: _searchFocus,
-                    textInputAction: TextInputAction.search,
-                    style: const TextStyle(color: Colors.white, fontSize: 14.5),
-                    cursorColor: const Color(0xFF38B2AC),
-                    decoration: const InputDecoration(
-                      hintText: 'Search title, author, genre...',
-                      hintStyle: TextStyle(
-                        color: Color(0xFF6B8A99),
-                        fontSize: 14,
-                      ),
-                      border: InputBorder.none,
-                      isDense: true,
-                    ),
-                    onChanged: (v) {
-                      bloc.add(LibraryQueryChanged(v));
-                      setState(() {});
-                    },
-                  ),
-                ),
-                if (_search.text.isNotEmpty)
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
-                    onPressed: () {
-                      _search.clear();
-                      bloc.add(const LibraryQueryChanged(''));
-                      setState(() {});
-                    },
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        // Circular search / filter action button
-        Tooltip(
-          message: 'Sort: ${_sortShortLabel(state.sort)}',
-          child: GestureDetector(
-            onTap: () => _showSortAndFilterSheet(state),
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF144658),
-                border: Border.all(
-                  color: state.sort != LibrarySort.lastRead
-                      ? const Color(0xFF38B2AC)
-                      : const Color(0xFF2C7D99).withValues(alpha: 0.5),
-                  width: 1.4,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF0C3A4B).withValues(alpha: 0.45),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.tune_rounded,
-                color: state.sort != LibrarySort.lastRead
-                    ? const Color(0xFF38B2AC)
-                    : Colors.white,
-                size: 21,
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -1470,12 +1352,12 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  /// Category chips in a pinned block with "Categories" header (matching reference design).
+  /// Search row, Category chips in a pinned block with "Categories" header.
   Widget _buildStickyControls(LibraryState state, {required bool needsTopPad}) {
     final t = context.tokens;
     final bloc = context.read<LibraryBloc>();
-    final isHomeAll = state.categoryFilter == null && state.query.trim().isEmpty;
     final topPadding = MediaQuery.paddingOf(context).top;
+    final isFiltered = state.sort != LibrarySort.lastRead;
 
     final chips = _WaterBubbleCategoryBar(
       categories: [null, ...state.categories],
@@ -1489,15 +1371,126 @@ class _LibraryPageState extends State<LibraryPage> {
       color: t.bg,
       padding: EdgeInsets.only(
         top: needsTopPad ? (topPadding + 6) : 6,
-        bottom: 8,
+        bottom: 6,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Categories Header Row (matches reference design: "Categories" + "See All >")
+          // 1. Search Bar & Filter/Sort Tune button (outside the top portion)
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 2, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    height: 46,
+                    padding: const EdgeInsets.only(left: 14, right: 6),
+                    decoration: BoxDecoration(
+                      color: t.surfaceCard,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: _searchFocus.hasFocus ? t.accent : t.border,
+                        width: _searchFocus.hasFocus ? 1.4 : 1,
+                      ),
+                      boxShadow: _searchFocus.hasFocus
+                          ? [
+                              BoxShadow(
+                                color: t.accent.withValues(alpha: 0.18),
+                                blurRadius: 10,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.search_rounded,
+                          size: 20,
+                          color: _searchFocus.hasFocus ? t.accent : t.textTertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _search,
+                            focusNode: _searchFocus,
+                            textInputAction: TextInputAction.search,
+                            style: TextStyle(color: t.textPrimary, fontSize: 14),
+                            cursorColor: t.accent,
+                            decoration: InputDecoration(
+                              hintText: state.categoryFilter != null
+                                  ? 'Search in ${state.categoryFilter}...'
+                                  : 'Search manga, manhwa, author...',
+                              hintStyle: TextStyle(
+                                color: t.textTertiary,
+                                fontSize: 13.5,
+                              ),
+                              border: InputBorder.none,
+                              isDense: true,
+                            ),
+                            onChanged: (v) {
+                              bloc.add(LibraryQueryChanged(v));
+                              setState(() {});
+                            },
+                          ),
+                        ),
+                        if (_search.text.isNotEmpty)
+                          GestureDetector(
+                            onTap: () {
+                              _search.clear();
+                              bloc.add(const LibraryQueryChanged(''));
+                              setState(() {});
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(Icons.close_rounded, size: 16, color: t.textTertiary),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Circular Filter / Sort Action Button
+                Tooltip(
+                  message: 'Sort: ${_sortShortLabel(state.sort)}',
+                  child: GestureDetector(
+                    onTap: () => _showSortAndFilterSheet(state),
+                    child: Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isFiltered ? t.accent.withValues(alpha: 0.18) : t.surfaceCard,
+                        border: Border.all(
+                          color: isFiltered ? t.accent : t.border,
+                          width: 1.2,
+                        ),
+                        boxShadow: isFiltered
+                            ? [
+                                BoxShadow(
+                                  color: t.accent.withValues(alpha: 0.25),
+                                  blurRadius: 10,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Icon(
+                        Icons.tune_rounded,
+                        color: isFiltered ? t.accent : t.textSecondary,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 2. Categories Header Row ("Categories" + "See All >")
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 16, 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1505,162 +1498,37 @@ class _LibraryPageState extends State<LibraryPage> {
                   'Categories',
                   style: TextStyle(
                     color: t.textPrimary,
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.3,
                   ),
                 ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!isHomeAll) ...[
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _showCompactSearch = !_showCompactSearch;
-                            if (_showCompactSearch) {
-                              _searchFocus.requestFocus();
-                            }
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _showCompactSearch || _search.text.isNotEmpty
-                                ? t.accent.withValues(alpha: 0.2)
-                                : t.surfaceCard,
-                            border: Border.all(
-                              color: _showCompactSearch || _search.text.isNotEmpty
-                                  ? t.accent
-                                  : t.border,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.search_rounded,
-                            size: 16,
-                            color: _showCompactSearch || _search.text.isNotEmpty
-                                ? t.accent
-                                : t.textSecondary,
+                GestureDetector(
+                  onTap: _showCategoryManagerSheet,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                    child: Row(
+                      children: [
+                        Text(
+                          'See All',
+                          style: TextStyle(
+                            color: t.accent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () => _showSortAndFilterSheet(state),
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: state.sort != LibrarySort.lastRead
-                                ? t.accent.withValues(alpha: 0.2)
-                                : t.surfaceCard,
-                            border: Border.all(
-                              color: state.sort != LibrarySort.lastRead
-                                  ? t.accent
-                                  : t.border,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.tune_rounded,
-                            size: 16,
-                            color: state.sort != LibrarySort.lastRead
-                                ? t.accent
-                                : t.textSecondary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    GestureDetector(
-                      onTap: _showCategoryManagerSheet,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                        child: Row(
-                          children: [
-                            Text(
-                              'See All',
-                              style: TextStyle(
-                                color: t.accent,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(width: 2),
-                            Icon(Icons.chevron_right_rounded, size: 16, color: t.accent),
-                          ],
-                        ),
-                      ),
+                        const SizedBox(width: 2),
+                        Icon(Icons.chevron_right_rounded, size: 16, color: t.accent),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
           ),
 
-          // Inline search field when searching on a category view
-          if (!isHomeAll && (_showCompactSearch || _search.text.isNotEmpty))
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: _buildCompactSearchField(state),
-            ),
-
-          // Liquid Water Bubble Category Pills
+          // 3. Liquid Water Bubble Category Pills
           chips,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCompactSearchField(LibraryState state) {
-    final t = context.tokens;
-    final bloc = context.read<LibraryBloc>();
-    final focused = _searchFocus.hasFocus;
-
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.only(left: 14, right: 6),
-      decoration: BoxDecoration(
-        color: t.surfaceCard,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: focused ? t.accent : t.border,
-          width: focused ? 1.4 : 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.search_rounded, size: 18, color: focused ? t.accent : t.textTertiary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _search,
-              focusNode: _searchFocus,
-              textInputAction: TextInputAction.search,
-              style: TextStyle(color: t.textPrimary, fontSize: 13.5),
-              cursorColor: t.accent,
-              decoration: InputDecoration(
-                hintText: 'Search in ${state.categoryFilter ?? "shelf"}...',
-                hintStyle: TextStyle(color: t.textTertiary, fontSize: 13.5),
-                border: InputBorder.none,
-                isDense: true,
-              ),
-              onChanged: (v) {
-                bloc.add(LibraryQueryChanged(v));
-                setState(() {});
-              },
-            ),
-          ),
-          if (_search.text.isNotEmpty)
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.close_rounded, size: 16, color: t.textSecondary),
-              onPressed: () {
-                _search.clear();
-                bloc.add(const LibraryQueryChanged(''));
-                setState(() {});
-              },
-            ),
         ],
       ),
     );
@@ -1886,10 +1754,7 @@ class _LibraryPageState extends State<LibraryPage> {
             final isHomeAll = state.categoryFilter == null && state.query.trim().isEmpty;
             final topPadding = MediaQuery.paddingOf(context).top;
             final needsTopPad = _isScrolled || !isHomeAll;
-            final hasActiveCompactSearch = !isHomeAll && (_showCompactSearch || state.query.isNotEmpty);
-            final controlsHeight = (needsTopPad ? (topPadding + 6.0) : 6.0) +
-                32.0 + 10.0 + 40.0 + 8.0 +
-                (hasActiveCompactSearch ? 54.0 : 0.0);
+            final controlsHeight = (needsTopPad ? (topPadding + 6.0) : 6.0) + 148.0;
 
             final gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
@@ -2186,8 +2051,8 @@ class _CountBadge extends StatelessWidget {
   }
 }
 
-class _CompactContinueCard extends StatelessWidget {
-  const _CompactContinueCard({
+class _ExpandedContinueCard extends StatelessWidget {
+  const _ExpandedContinueCard({
     required this.series,
     required this.onTap,
   });
@@ -2204,106 +2069,136 @@ class _CompactContinueCard extends StatelessWidget {
       onTap: () => onTap(series),
       scaleDown: 0.98,
       child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: t.surfaceCard,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.border.withValues(alpha: 0.8)),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: t.border.withValues(alpha: 0.8),
+            width: 1.0,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 10,
+              color: Colors.black.withValues(alpha: 0.28),
+              blurRadius: 12,
               offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Thumbnail
-            AspectRatio(
-              aspectRatio: 0.72,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SeriesCover(series: series, memCacheWidth: 200),
+            // Expanded Cover Thumbnail
+            SizedBox(
+              height: 86,
+              child: AspectRatio(
+                aspectRatio: 0.70,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SeriesCover(series: series, memCacheWidth: 240),
+                ),
               ),
             ),
-            const SizedBox(width: 12),
-            // Title & Progress
+            const SizedBox(width: 14),
+            // Title & Progress Details
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(
                     children: [
                       Container(
-                        width: 5,
-                        height: 5,
+                        width: 6,
+                        height: 6,
                         decoration: BoxDecoration(
                           color: t.accent,
                           shape: BoxShape.circle,
                         ),
                       ),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: 6),
                       Text(
                         'CONTINUE READING',
                         style: TextStyle(
                           color: t.accent,
-                          fontSize: 10,
+                          fontSize: 10.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.8,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 5),
                   Text(
                     series.title,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: t.textPrimary,
-                      fontSize: 13.5,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
+                      height: 1.2,
                     ),
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    resume.isNotEmpty ? resume : series.host,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 11.5,
-                    ),
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.auto_stories_rounded,
+                        size: 13,
+                        color: t.textSecondary,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          resume.isNotEmpty ? resume : series.host,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: t.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            // Mini Resume Button
+            const SizedBox(width: 10),
+            // Prominent Resume Button Pill
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: t.accent,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: t.accent.withValues(alpha: 0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     Icons.play_arrow_rounded,
-                    size: 16,
+                    size: 18,
                     color: Color(0xFF04130C),
                   ),
-                  SizedBox(width: 2),
+                  SizedBox(width: 3),
                   Text(
                     'Resume',
                     style: TextStyle(
                       color: Color(0xFF04130C),
-                      fontSize: 12,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
                     ),
                   ),
                 ],
@@ -2367,11 +2262,11 @@ class _WaterBubbleCategoryBarState extends State<_WaterBubbleCategoryBar>
     final t = context.tokens;
 
     return SizedBox(
-      height: 38,
+      height: 42,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
         itemCount: widget.categories.length + 1, // +1 for Manage
         itemBuilder: (context, index) {
           if (index == widget.categories.length) {
@@ -2567,10 +2462,8 @@ class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
     return Material(
       color: background,
       elevation: 0,
-      child: OverflowBox(
-        alignment: Alignment.topCenter,
-        minHeight: 0,
-        maxHeight: height,
+      child: SizedBox(
+        height: height,
         child: child,
       ),
     );
