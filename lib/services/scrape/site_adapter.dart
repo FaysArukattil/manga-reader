@@ -21,6 +21,7 @@ class ScrapedChapterResult {
     this.chapterLabel,
     this.nextChapterUrl,
     this.prevChapterUrl,
+    this.nextGuessed = false,
     this.isWebtoon = false,
     this.availableChapters = const [],
     this.coverUrl,
@@ -35,6 +36,10 @@ class ScrapedChapterResult {
   final String? chapterLabel;
   final String? nextChapterUrl;
   final String? prevChapterUrl;
+
+  /// True when [nextChapterUrl] was inferred by bumping the chapter number in
+  /// the URL rather than read from a real "next" link on the page.
+  final bool nextGuessed;
   final bool isWebtoon;
   final List<ChapterRef> availableChapters;
   final String? coverUrl;
@@ -49,6 +54,7 @@ class ScrapedChapterResult {
     String? chapterLabel,
     String? nextChapterUrl,
     String? prevChapterUrl,
+    bool? nextGuessed,
     bool? isWebtoon,
     List<ChapterRef>? availableChapters,
     String? coverUrl,
@@ -63,6 +69,7 @@ class ScrapedChapterResult {
         chapterLabel: chapterLabel ?? this.chapterLabel,
         nextChapterUrl: nextChapterUrl ?? this.nextChapterUrl,
         prevChapterUrl: prevChapterUrl ?? this.prevChapterUrl,
+        nextGuessed: nextGuessed ?? this.nextGuessed,
         isWebtoon: isWebtoon ?? this.isWebtoon,
         availableChapters: availableChapters ?? this.availableChapters,
         coverUrl: coverUrl ?? this.coverUrl,

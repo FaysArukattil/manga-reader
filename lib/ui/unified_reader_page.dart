@@ -135,6 +135,30 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
     if (mounted) Navigator.of(context).pop();
   }
 
+  Future<void> _verifyNext(String url) async {
+    final scrape = context.read<ScrapeService>();
+    final result = await showModalBottomSheet<dynamic>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      enableDrag: false,
+      builder: (ctx) => CfVerificationSheet(url: url),
+    );
+    if (result is CfVerifiedPage && result.pages.length >= 2) {
+      await scrape.cacheVerified(
+        result.url,
+        pages: result.pages,
+        title: result.title,
+        nextUrl: result.nextUrl,
+        prevUrl: result.prevUrl,
+        chapters: result.chapters,
+      );
+      if (mounted) _cubit.onNextVerified();
+    } else if (result is CfVerifiedPage) {
+      if (mounted) _cubit.onNextVerified();
+    }
+  }
+
   void _showHiddenSettings() {
     showModalBottomSheet<void>(
       context: context,
@@ -525,6 +549,13 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                         pageFlipEffect: state.pageFlipEffect,
                         soundEffect: state.soundEffect,
                         isAllCaughtUp: state.isAllCaughtUp,
+                        caughtUp: _CaughtUpCard(
+                          checking: state.checkingForNew,
+                          needsVerification: state.nextVerificationUrl != null,
+                          onCheck: () => _cubit.checkForNewChapters(),
+                          onVerify: () =>
+                              _verifyNext(state.nextVerificationUrl!),
+                        ),
                         onPageChanged: _cubit.onPageChanged,
                         onCenterTap: _showHiddenSettings,
                       ),
@@ -672,6 +703,7 @@ class _StreamPager extends StatefulWidget {
     required this.pageFlipEffect,
     required this.soundEffect,
     required this.isAllCaughtUp,
+    required this.caughtUp,
     required this.onPageChanged,
     required this.onCenterTap,
   });
@@ -684,6 +716,7 @@ class _StreamPager extends StatefulWidget {
   final bool pageFlipEffect;
   final bool soundEffect;
   final bool isAllCaughtUp;
+  final Widget caughtUp;
   final ValueChanged<int> onPageChanged;
   final VoidCallback onCenterTap;
 
@@ -785,7 +818,7 @@ class _StreamPagerState extends State<_StreamPager> {
 
   Widget _buildPageItem(BuildContext context, int i) {
     if (i == widget.pages.length) {
-      return const _CaughtUpCard();
+      return widget.caughtUp;
     }
 
     final item = widget.pages[i];
@@ -1051,8 +1084,8 @@ class _PageImageState extends State<_PageImage> {
                 onPointerUp: (e) {
                   if (!widget.isVertical) return;
                   final dy = e.position.dy - _dragStartY;
-                  final dt = math.max(1,
-                      DateTime.now().difference(_dragStartTime).inMilliseconds);
+                  final dt = math.max(
+                      1, DateTime.now().difference(_dragStartTime).inMilliseconds);
                   final vy = (dy / dt) * 1000.0;
 
                   final hasScroll = _scrollController.hasClients &&
@@ -1130,39 +1163,86 @@ class _PageImageState extends State<_PageImage> {
 // -------------------------------------------------------- all caught up card
 
 class _CaughtUpCard extends StatelessWidget {
-  const _CaughtUpCard();
+  const _CaughtUpCard({
+    required this.checking,
+    required this.needsVerification,
+    required this.onCheck,
+    required this.onVerify,
+  });
+
+  final bool checking;
+  final bool needsVerification;
+  final VoidCallback onCheck;
+  final VoidCallback onVerify;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    const green = Color(0xFF00B96B);
+    return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 40),
+        padding: const EdgeInsets.symmetric(horizontal: 40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.auto_stories_rounded,
-              color: Colors.white24,
+              needsVerification
+                  ? Icons.shield_outlined
+                  : Icons.auto_stories_rounded,
+              color: needsVerification ? green : Colors.white24,
               size: 48,
             ),
-            SizedBox(height: 18),
+            const SizedBox(height: 18),
             Text(
-              "You're all caught up",
-              style: TextStyle(
+              needsVerification
+                  ? 'Next chapter is ready'
+                  : "You're all caught up",
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
               ),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
-              "Checking quietly for new chapters...",
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 13,
-              ),
+              needsVerification
+                  ? 'This site needs a quick one-time verification to open it.'
+                  : (checking
+                      ? 'Checking for new chapters...'
+                      : "We'll keep an eye out for the next chapter."),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
+            const SizedBox(height: 20),
+            if (needsVerification)
+              ElevatedButton.icon(
+                onPressed: onVerify,
+                icon: const Icon(Icons.verified_user_outlined, size: 18),
+                label: const Text('Verify & continue'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: green,
+                  foregroundColor: Colors.white,
+                ),
+              )
+            else if (checking)
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(green),
+                ),
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: onCheck,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Check for new chapters'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                ),
+              ),
           ],
         ),
       ),
@@ -1292,8 +1372,20 @@ class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
       builder: (ctx) => CfVerificationSheet(url: widget.url),
     );
 
-    if (result is List<String> && result.length >= 2) {
-      widget.onPagesResolved?.call(result);
+    if (result is CfVerifiedPage) {
+      // Remember it forever: this chapter will never ask for verification
+      // again, and the reader can continue to the next/previous chapter.
+      if (result.pages.length >= 2 && mounted) {
+        await context.read<ScrapeService>().cacheVerified(
+              result.url,
+              pages: result.pages,
+              title: result.title,
+              nextUrl: result.nextUrl,
+              prevUrl: result.prevUrl,
+              chapters: result.chapters,
+            );
+      }
+      widget.onVerified();
     } else if (result == true) {
       widget.onVerified();
     }

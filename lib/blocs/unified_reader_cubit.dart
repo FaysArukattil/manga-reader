@@ -24,6 +24,8 @@ class UnifiedReaderState extends Equatable {
     this.availableChapters = const [],
     this.needsVerification = false,
     this.verificationUrl,
+    this.nextVerificationUrl,
+    this.checkingForNew = false,
     this.error,
   });
 
@@ -40,6 +42,11 @@ class UnifiedReaderState extends Equatable {
   final List<ChapterRef> availableChapters;
   final bool needsVerification;
   final String? verificationUrl;
+
+  /// Set when the NEXT chapter (not the current one) needs Cloudflare
+  /// verification; the end-of-stream card offers a one-tap verify.
+  final String? nextVerificationUrl;
+  final bool checkingForNew;
   final String? error;
 
   ReaderPageItem? get currentPageItem =>
@@ -68,6 +75,9 @@ class UnifiedReaderState extends Equatable {
     bool? needsVerification,
     String? verificationUrl,
     bool clearVerificationUrl = false,
+    String? nextVerificationUrl,
+    bool clearNextVerificationUrl = false,
+    bool? checkingForNew,
     String? error,
     bool clearError = false,
   }) =>
@@ -87,6 +97,10 @@ class UnifiedReaderState extends Equatable {
         verificationUrl: clearVerificationUrl
             ? null
             : (verificationUrl ?? this.verificationUrl),
+        nextVerificationUrl: clearNextVerificationUrl
+            ? null
+            : (nextVerificationUrl ?? this.nextVerificationUrl),
+        checkingForNew: checkingForNew ?? this.checkingForNew,
         error: clearError ? null : (error ?? this.error),
       );
 
@@ -105,6 +119,8 @@ class UnifiedReaderState extends Equatable {
         availableChapters,
         needsVerification,
         verificationUrl,
+        nextVerificationUrl,
+        checkingForNew,
         error,
       ];
 }
@@ -373,8 +389,14 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
     }
   }
 
+  bool _loadingNext = false;
+  int _pollAttempts = 0;
+  DateTime _lastAutoCheck = DateTime.fromMillisecondsSinceEpoch(0);
+
   Future<void> _checkPreloadNextChapter() async {
-    if (state.loadingNextChapter || state.pages.isEmpty) return;
+    if (_loadingNext || state.loadingNextChapter || state.pages.isEmpty) return;
+    // Don't hammer a chapter that is waiting for the user to verify it.
+    if (state.nextVerificationUrl != null) return;
 
     // Preload when user is within 5 pages of the end of the loaded stream
     final remaining = state.pages.length - 1 - state.currentIndex;
@@ -383,54 +405,139 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
     }
   }
 
-  Future<void> _loadNextChapter() async {
-    if (state.loadingNextChapter || state.pages.isEmpty) return;
-    final lastItem = state.pages.last;
-    final nextId = await source.getNextChapterId(lastItem.chapterId);
-
-    if (nextId == null || _loadedChapterIds.contains(nextId)) {
-      return;
-    }
-
-    emit(state.copyWith(loadingNextChapter: true));
+  Future<void> _loadNextChapter({String? knownNextId}) async {
+    if (_loadingNext || state.pages.isEmpty) return;
+    _loadingNext = true;
     try {
-      final nextPages = await source.loadChapter(nextId);
-      if (nextPages.isNotEmpty) {
-        _loadedChapterIds.add(nextId);
-        final combined = List<ReaderPageItem>.from(state.pages)
-          ..addAll(nextPages);
+      final lastItem = state.pages.last;
+      final nextId =
+          knownNextId ?? await source.getNextChapterId(lastItem.chapterId);
+
+      if (nextId == null || _loadedChapterIds.contains(nextId)) {
+        return;
+      }
+
+      emit(state.copyWith(loadingNextChapter: true));
+      try {
+        final nextPages = await source.loadChapter(nextId);
+        if (nextPages.isNotEmpty) {
+          _loadedChapterIds.add(nextId);
+          _pollTimer?.cancel();
+          final combined = List<ReaderPageItem>.from(state.pages)
+            ..addAll(nextPages);
+          emit(state.copyWith(
+            pages: combined,
+            loadingNextChapter: false,
+            isAllCaughtUp: false,
+            clearNextVerificationUrl: true,
+          ));
+        } else {
+          // The "next" link led nowhere: we're on the newest chapter.
+          emit(state.copyWith(loadingNextChapter: false, isAllCaughtUp: true));
+          _startPollingForNewChapter(lastItem.chapterId);
+        }
+      } on VerificationRequiredException catch (v) {
+        // Next chapter is protected. Keep reading what we have and offer a
+        // one-tap verify on the last page instead of failing silently.
         emit(state.copyWith(
-          pages: combined,
           loadingNextChapter: false,
-          isAllCaughtUp: false,
+          isAllCaughtUp: true,
+          nextVerificationUrl: v.url,
         ));
-      } else {
+      } catch (_) {
         emit(state.copyWith(loadingNextChapter: false));
       }
-    } catch (_) {
-      emit(state.copyWith(loadingNextChapter: false));
+    } finally {
+      _loadingNext = false;
     }
   }
 
   Future<void> _onReachedEnd() async {
     final lastItem = state.pages.isNotEmpty ? state.pages.last : null;
     if (lastItem == null) return;
+    if (state.nextVerificationUrl != null) return;
 
     final nextId = await source.getNextChapterId(lastItem.chapterId);
     if (nextId == null) {
       emit(state.copyWith(isAllCaughtUp: true));
+      // Ask the live site right away (throttled) instead of waiting minutes.
+      final now = DateTime.now();
+      if (now.difference(_lastAutoCheck).inSeconds >= 120) {
+        _lastAutoCheck = now;
+        unawaited(checkForNewChapters(silent: true));
+      }
       _startPollingForNewChapter(lastItem.chapterId);
     } else if (!_loadedChapterIds.contains(nextId)) {
       await _loadNextChapter();
     }
   }
 
+  /// Re-checks the live site for a chapter newer than the last one loaded.
+  /// Used by the end-of-stream card ("Check for new chapters") and by the
+  /// background poll. When [silent] the user isn't asked to verify.
+  Future<void> checkForNewChapters({bool silent = false}) async {
+    if (state.pages.isEmpty || state.checkingForNew || _loadingNext) return;
+    final src = source;
+    if (src is! RefreshableChapterSource) return;
+
+    final lastId = state.pages.last.chapterId;
+    emit(state.copyWith(checkingForNew: true));
+    try {
+      final nextId = await src.refreshNextChapterId(lastId);
+      emit(state.copyWith(checkingForNew: false));
+      if (nextId != null && !_loadedChapterIds.contains(nextId)) {
+        await _loadNextChapter(knownNextId: nextId);
+      }
+    } on VerificationRequiredException catch (v) {
+      emit(state.copyWith(
+        checkingForNew: false,
+        nextVerificationUrl: silent ? null : v.url,
+      ));
+    } catch (_) {
+      emit(state.copyWith(checkingForNew: false));
+    }
+  }
+
+  /// Called after the user passed verification (the verified page is already
+  /// in the scrape cache, so nothing is asked twice).
+  Future<void> onNextVerified() async {
+    final verifiedUrl = state.nextVerificationUrl;
+    emit(state.copyWith(clearNextVerificationUrl: true));
+    _pollAttempts = 0;
+    if (state.pages.isEmpty) return;
+
+    final lastId = state.pages.last.chapterId;
+    final src = source;
+    final verifiedWasCurrentLast = verifiedUrl != null &&
+        UrlTools.normalize(verifiedUrl) == UrlTools.normalize(lastId);
+
+    if (verifiedWasCurrentLast && src is RefreshableChapterSource) {
+      // The live "is there a new chapter?" check was what got blocked.
+      await checkForNewChapters();
+    } else {
+      // The next chapter itself was blocked; it is cached now.
+      await _loadNextChapter();
+    }
+  }
+
   void _startPollingForNewChapter(String lastChapterId) {
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+    if (_pollTimer?.isActive ?? false) return;
+    _pollAttempts = 0;
+    // Gentle: every 3 minutes, at most 10 times per session at the end.
+    _pollTimer = Timer.periodic(const Duration(minutes: 3), (t) async {
+      _pollAttempts++;
+      if (_pollAttempts > 10) {
+        t.cancel();
+        return;
+      }
+      final src = source;
+      if (src is RefreshableChapterSource) {
+        await checkForNewChapters(silent: true);
+        return;
+      }
       final nextId = await source.getNextChapterId(lastChapterId);
       if (nextId != null && !_loadedChapterIds.contains(nextId)) {
-        _pollTimer?.cancel();
+        t.cancel();
         await _loadNextChapter();
       }
     });

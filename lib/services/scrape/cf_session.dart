@@ -24,10 +24,9 @@ class CfSession {
   static Future<void> init() async {
     try {
       final ua = await InAppWebViewController.getDefaultUserAgent();
-      if (ua.trim().isNotEmpty) {
-        // Android WebView appends "; wv" which some sites treat as a bot flag.
-        _userAgent = ua.replaceAll('; wv)', ')');
-      }
+      // Use it EXACTLY as the WebView reports it. cf_clearance is tied to the
+      // UA that solved the challenge, and the WebViews send this very string.
+      if (ua.trim().isNotEmpty) _userAgent = ua;
     } catch (_) {}
   }
 
@@ -43,16 +42,14 @@ class CfSession {
     try {
       final host = Uri.parse(url).host;
       if (host.isEmpty) return;
-      final cookies =
-          await CookieManager.instance().getCookies(url: WebUri(url));
+      final cookies = await CookieManager.instance().getCookies(url: WebUri(url));
       if (cookies.isEmpty) return;
       _cookieByHost[host] =
           cookies.map((c) => '${c.name}=${c.value}').join('; ');
     } catch (_) {}
   }
 
-  static Future<void> primeAll(
-      String pageUrl, Iterable<String> imageUrls) async {
+  static Future<void> primeAll(String pageUrl, Iterable<String> imageUrls) async {
     final hosts = <String>{};
     await primeCookies(pageUrl);
     for (final u in imageUrls) {
@@ -65,8 +62,7 @@ class CfSession {
 
   static Future<String?> cookieHeader(String url) async {
     try {
-      final cookies =
-          await CookieManager.instance().getCookies(url: WebUri(url));
+      final cookies = await CookieManager.instance().getCookies(url: WebUri(url));
       if (cookies.isEmpty) return null;
       return cookies.map((c) => '${c.name}=${c.value}').join('; ');
     } catch (_) {
@@ -76,8 +72,7 @@ class CfSession {
 
   static Future<String?> clearanceValue(String url) async {
     try {
-      final cookies =
-          await CookieManager.instance().getCookies(url: WebUri(url));
+      final cookies = await CookieManager.instance().getCookies(url: WebUri(url));
       for (final c in cookies) {
         if (c.name == 'cf_clearance') return c.value?.toString();
       }

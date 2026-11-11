@@ -213,7 +213,9 @@ class GenericSiteAdapter implements SiteAdapter {
     final og = doc
             .querySelector('meta[property="og:image"]')
             ?.attributes['content'] ??
-        doc.querySelector('meta[name="twitter:image"]')?.attributes['content'];
+        doc
+            .querySelector('meta[name="twitter:image"]')
+            ?.attributes['content'];
     if (og != null && og.trim().isNotEmpty) {
       final res = _resolveUrl(og.trim(), baseUri);
       if (res != null && !_isJunkCoverUrl(res)) return res;

@@ -39,34 +39,71 @@ class VerificationRequiredException implements Exception {
   String toString() => 'VerificationRequiredException(url: $url)';
 }
 
-class ScrapedSource implements ChapterSource {
+/// Optional capability: a source that can re-check the network for a newer
+/// chapter, bypassing whatever it has cached.
+abstract class RefreshableChapterSource implements ChapterSource {
+  /// Returns the id of the chapter after [chapterId], looking at the live site.
+  /// Throws [VerificationRequiredException] if the site wants verification.
+  Future<String?> refreshNextChapterId(String chapterId);
+}
+
+class ScrapedSource implements ChapterSource, RefreshableChapterSource {
   ScrapedSource({required this.scrapeService});
 
   final ScrapeService scrapeService;
   final Map<String, String?> _nextMap = {};
   final Map<String, String?> _prevMap = {};
+  final Map<String, bool> _nextGuessed = {};
   final Map<String, List<ChapterRef>> _catalogueMap = {};
+
+  /// Chapter URLs that were tried and had no pages (the usual fate of a
+  /// guessed "next chapter" when you're on the newest one).
+  final Map<String, DateTime> _dead = {};
+  static const Duration _deadTtl = Duration(minutes: 10);
+
   String? _lastCoverUrl;
 
   @override
   String? get lastCoverUrl => _lastCoverUrl;
 
-  @override
-  Future<List<ReaderPageItem>> loadChapter(String chapterIdOrUrl) async {
-    final result = await scrapeService.scrapeChapter(chapterIdOrUrl);
-    _nextMap[chapterIdOrUrl] = result.nextChapterUrl;
-    _prevMap[chapterIdOrUrl] = result.prevChapterUrl;
+  void _remember(String id, ScrapedChapterResult result) {
+    _nextMap[id] = result.nextChapterUrl;
+    _prevMap[id] = result.prevChapterUrl;
+    _nextGuessed[id] = result.nextGuessed;
     if (result.availableChapters.isNotEmpty) {
-      _catalogueMap[chapterIdOrUrl] = result.availableChapters;
+      _catalogueMap[id] = result.availableChapters;
     }
     if (result.coverUrl != null && result.coverUrl!.isNotEmpty) {
       _lastCoverUrl = result.coverUrl;
     }
+  }
+
+  bool _isDead(String? id) {
+    if (id == null) return false;
+    final at = _dead[id];
+    if (at == null) return false;
+    if (DateTime.now().difference(at) > _deadTtl) {
+      _dead.remove(id);
+      return false;
+    }
+    return true;
+  }
+
+  @override
+  Future<List<ReaderPageItem>> loadChapter(String chapterIdOrUrl) async {
+    final result = await scrapeService.scrapeChapter(chapterIdOrUrl);
+    _remember(chapterIdOrUrl, result);
 
     if (result.needsVerification) {
       throw VerificationRequiredException(
         result.verificationUrl ?? chapterIdOrUrl,
       );
+    }
+
+    if (result.pages.isEmpty) {
+      _dead[chapterIdOrUrl] = DateTime.now();
+    } else {
+      _dead.remove(chapterIdOrUrl);
     }
 
     final label = result.chapterLabel ?? '';
@@ -87,28 +124,40 @@ class ScrapedSource implements ChapterSource {
 
   @override
   Future<String?> getNextChapterId(String currentChapterIdOrUrl) async {
-    if (_nextMap.containsKey(currentChapterIdOrUrl)) {
-      return _nextMap[currentChapterIdOrUrl];
+    if (!_nextMap.containsKey(currentChapterIdOrUrl)) {
+      final res = await scrapeService.scrapeChapter(currentChapterIdOrUrl);
+      if (!res.needsVerification) _remember(currentChapterIdOrUrl, res);
     }
-    final res = await scrapeService.scrapeChapter(currentChapterIdOrUrl);
-    _nextMap[currentChapterIdOrUrl] = res.nextChapterUrl;
-    if (res.availableChapters.isNotEmpty) {
-      _catalogueMap[currentChapterIdOrUrl] = res.availableChapters;
+    final next = _nextMap[currentChapterIdOrUrl];
+    if (next == null || _isDead(next)) return null;
+    return next;
+  }
+
+  @override
+  Future<String?> refreshNextChapterId(String chapterId) async {
+    final res =
+        await scrapeService.scrapeChapter(chapterId, forceRefresh: true);
+    if (res.needsVerification) {
+      throw VerificationRequiredException(res.verificationUrl ?? chapterId);
     }
-    return res.nextChapterUrl;
+    if (res.pages.isNotEmpty || res.nextChapterUrl != null) {
+      _remember(chapterId, res);
+    }
+    final next = _nextMap[chapterId];
+    if (next == null) return null;
+    // A real link on the live page beats any earlier "dead" verdict; a guess
+    // gets another try only once its cool-down has passed.
+    if (_nextGuessed[chapterId] != true) _dead.remove(next);
+    return _isDead(next) ? null : next;
   }
 
   @override
   Future<String?> getPrevChapterId(String currentChapterIdOrUrl) async {
-    if (_prevMap.containsKey(currentChapterIdOrUrl)) {
-      return _prevMap[currentChapterIdOrUrl];
+    if (!_prevMap.containsKey(currentChapterIdOrUrl)) {
+      final res = await scrapeService.scrapeChapter(currentChapterIdOrUrl);
+      if (!res.needsVerification) _remember(currentChapterIdOrUrl, res);
     }
-    final res = await scrapeService.scrapeChapter(currentChapterIdOrUrl);
-    _prevMap[currentChapterIdOrUrl] = res.prevChapterUrl;
-    if (res.availableChapters.isNotEmpty) {
-      _catalogueMap[currentChapterIdOrUrl] = res.availableChapters;
-    }
-    return res.prevChapterUrl;
+    return _prevMap[currentChapterIdOrUrl];
   }
 
   @override

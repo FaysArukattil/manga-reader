@@ -4,13 +4,33 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../services/scrape/cf_session.dart';
+import '../services/scrape/site_adapter.dart';
 import '../services/web_scraper.dart';
+
+/// What the sheet read from the page once it was unlocked. The caller stores
+/// it in the scrape cache so this chapter is never verified again.
+class CfVerifiedPage {
+  const CfVerifiedPage({
+    required this.url,
+    required this.pages,
+    this.title,
+    this.nextUrl,
+    this.prevUrl,
+    this.chapters = const [],
+  });
+
+  final String url;
+  final List<String> pages;
+  final String? title;
+  final String? nextUrl;
+  final String? prevUrl;
+  final List<ChapterRef> chapters;
+}
 
 /// Bottom sheet that shows the real site so the user can pass Cloudflare /
 /// Turnstile once. Pops with:
-///   * `List<String>` (>= 2)  -> chapter pages already read from the page
-///   * `true`                 -> challenge cleared, caller should re-scrape
-///   * `false` / null         -> cancelled
+///   * [CfVerifiedPage]  -> challenge cleared; pages/nav read from the page
+///   * `false` / null    -> cancelled
 ///
 /// Why the old one looped:
 ///  - it considered "a cf_clearance cookie exists" as solved, so a stale
@@ -67,16 +87,64 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
     return out;
   }
 
-  Future<void> _finish([Object? result]) async {
+  Future<void> _finish() async {
     if (_done) return;
     _done = true;
     _poll?.cancel();
-    final pages = result is List<String> ? result : await _readPages();
-    // Let image downloads send cf_clearance + the matching UA.
-    await CfSession.primeAll(widget.url, pages.take(3));
+
+    // Lazy-loaded readers need a nudge; try a few times before giving up.
+    var pages = <String>[];
+    for (var i = 0; i < 4 && pages.length < 2; i++) {
+      try {
+        await _web?.evaluateJavascript(
+          source:
+              'window.scrollTo(0, document.body.scrollHeight/2); setTimeout(function(){window.scrollTo(0,0);}, 150);',
+        );
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      pages = await _readPages();
+    }
+
+    String? next, prev, title;
+    final chapters = <ChapterRef>[];
+    try {
+      final nav = await _web?.evaluateJavascript(
+        source: WebScraper.extractNavigationJs,
+      );
+      if (nav is Map) {
+        next = nav['next']?.toString();
+        prev = nav['prev']?.toString();
+        final list = nav['chapters'];
+        if (list is List) {
+          for (final c in list) {
+            if (c is Map && c['url'] != null && c['label'] != null) {
+              chapters.add(
+                ChapterRef(
+                  url: c['url'].toString(),
+                  label: c['label'].toString(),
+                ),
+              );
+            }
+          }
+        }
+      }
+      title = await _web?.getTitle();
+    } catch (_) {}
+
+    // Image downloads must send cf_clearance + the matching UA.
+    await CfSession.primeAll(widget.url, pages);
     CfSession.webViewOnlyHosts.add(Uri.tryParse(widget.url)?.host ?? '');
     if (!mounted) return;
-    Navigator.of(context).pop(pages.length >= 2 ? pages : true);
+    Navigator.of(context).pop(
+      CfVerifiedPage(
+        url: widget.url,
+        pages: pages,
+        title: title,
+        nextUrl: next,
+        prevUrl: prev,
+        chapters: chapters,
+      ),
+    );
   }
 
   /// Solved = the page in front of us is a normal page (no challenge markers),

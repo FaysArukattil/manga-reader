@@ -9,6 +9,7 @@ import '../../ui/ad_block.dart';
 import '../web_scraper.dart';
 import 'cf_session.dart';
 import 'generic_site_adapter.dart';
+import 'scrape_cache.dart';
 import 'site_adapter.dart';
 
 class ScrapeService {
@@ -46,15 +47,60 @@ class ScrapeService {
   ///    auto-challenges, then scrolls + reads JS globals)
   /// 3. Series overview auto-detection (resolves chapter list -> chapter 1)
   ///
+  /// Results are cached on disk; pass [forceRefresh] to look for new content.
+  ///
   /// The user is only asked to verify manually if the headless WebView could
   /// not get past Cloudflare on its own.
-  Future<ScrapedChapterResult> scrapeChapter(String url) async {
+  Future<ScrapedChapterResult> scrapeChapter(
+    String url, {
+    bool forceRefresh = false,
+  }) async {
+    // Cache-first: a chapter that was scraped (or verified) once is served
+    // from disk, so no network, no Cloudflare, no re-verification.
+    if (!forceRefresh) {
+      final cached = await ScrapeCache.instance.get(url);
+      if (cached != null) {
+        await CfSession.primeAll(url, cached.pages);
+        return cached;
+      }
+    }
+
     final result = await _scrapeChapter(url);
-    if (result.pages.isNotEmpty) {
+    if (result.pages.length >= 2 && !result.needsVerification) {
+      await ScrapeCache.instance.put(url, result);
+      if (result.chapterUrl != url) {
+        await ScrapeCache.instance.put(result.chapterUrl, result);
+      }
       // Make cf_clearance + UA available to image downloads.
-      await CfSession.primeAll(url, result.pages.take(3));
+      await CfSession.primeAll(url, result.pages);
     }
     return result;
+  }
+
+  /// Stores a chapter the user just verified by hand, so it is never asked
+  /// for again and the reader can continue to the next/previous chapter.
+  Future<void> cacheVerified(
+    String url, {
+    required List<String> pages,
+    String? title,
+    String? nextUrl,
+    String? prevUrl,
+    List<ChapterRef> chapters = const [],
+  }) async {
+    if (pages.length < 2) return;
+    final result = ScrapedChapterResult(
+      chapterUrl: url,
+      pages: pages,
+      title: title != null ? UrlTools.cleanTitle(title) : null,
+      chapterLabel: UrlTools.chapterLabel(url),
+      nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
+      prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
+      nextGuessed: nextUrl == null,
+      isWebtoon: true,
+      availableChapters: chapters,
+    );
+    await ScrapeCache.instance.put(url, result);
+    await CfSession.primeAll(url, pages);
   }
 
   Future<ScrapedChapterResult> _scrapeChapter(String url) async {
@@ -107,7 +153,7 @@ class ScrapeService {
                     : null);
 
             if (targetUrl != null && targetUrl != url) {
-              final chRes = await _scrapeChapter(targetUrl);
+              final chRes = await scrapeChapter(targetUrl);
               if (chRes.pages.length >= 2 || chRes.needsVerification) {
                 return chRes.copyWith(
                   availableChapters: result.availableChapters.isNotEmpty
@@ -141,7 +187,7 @@ class ScrapeService {
               : null);
 
       if (targetUrl != null && targetUrl != url) {
-        final chRes = await _scrapeChapter(targetUrl);
+        final chRes = await scrapeChapter(targetUrl);
         if (chRes.pages.length >= 2 || chRes.needsVerification) {
           return chRes.copyWith(
             availableChapters: rendered.availableChapters.isNotEmpty
@@ -160,6 +206,7 @@ class ScrapeService {
       chapterLabel: UrlTools.chapterLabel(url),
       nextChapterUrl: UrlTools.stepChapter(url, 1),
       prevChapterUrl: UrlTools.stepChapter(url, -1),
+      nextGuessed: true,
     );
   }
 
@@ -299,11 +346,11 @@ class ScrapeService {
             ScrapedChapterResult(
               chapterUrl: url,
               pages: pages,
-              title:
-                  finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
+              title: finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
               chapterLabel: UrlTools.chapterLabel(url),
               nextChapterUrl: nextUrl ?? UrlTools.stepChapter(url, 1),
               prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
+              nextGuessed: nextUrl == null,
               isWebtoon: pages.length >= 2,
               availableChapters: availableChapters,
             ),

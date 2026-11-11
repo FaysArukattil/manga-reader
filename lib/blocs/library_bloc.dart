@@ -387,9 +387,13 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       }
       try {
         final currentChapter = s.chapterUrl ?? s.url;
-        final res = await _scrape.scrapeChapter(currentChapter);
+        // Live check (bypasses the chapter cache) - but a guessed "chapter+1"
+        // URL is not evidence of a new chapter, only a real next link is.
+        final res =
+            await _scrape.scrapeChapter(currentChapter, forceRefresh: true);
         final nextUrl = res.nextChapterUrl;
-        if (nextUrl != null && nextUrl != currentChapter) {
+        if (res.needsVerification) continue;
+        if (nextUrl != null && !res.nextGuessed && nextUrl != currentChapter) {
           _repo.update(
             s.id,
             {
