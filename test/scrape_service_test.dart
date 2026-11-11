@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/dom.dart' as dom;
+import 'package:shelfmark/services/scrape/cf_session.dart';
 import 'package:shelfmark/services/scrape/generic_site_adapter.dart';
 
 void main() {
@@ -367,6 +368,20 @@ void main() {
       expect(result.pages.length, equals(2));
       expect(result.pages[0], equals('https://cdn.example.com/p1.webp'));
       expect(result.pages[1], equals('https://cdn.example.com/p2.webp'));
+    });
+
+    test('imageHeaders omits Referer for comix.to and .site CDNs to avoid 403 blocks', () {
+      final headersComix = CfSession.imageHeaders(
+        'https://lov.softtouchgoods.site/hi/page1.webp',
+        'https://comix.to/title/manga/ch-60',
+      );
+      expect(headersComix.containsKey('Referer'), isFalse);
+
+      final headersNormal = CfSession.imageHeaders(
+        'https://cdn.manga.com/images/page1.jpg',
+        'https://mangasite.com/chapter-1',
+      );
+      expect(headersNormal['Referer'], equals('https://mangasite.com/chapter-1'));
     });
   });
 }

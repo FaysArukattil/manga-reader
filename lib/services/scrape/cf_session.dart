@@ -132,14 +132,25 @@ class CfSession {
 
   /// Headers for downloading a page image (used by CachedNetworkImage).
   static Map<String, String> imageHeaders(String imageUrl, String? referer) {
-    final host = Uri.tryParse(imageUrl)?.host ?? '';
-    final refHost = referer != null ? (Uri.tryParse(referer)?.host ?? '') : '';
-    final cookie = _findCookie(host) ?? (refHost.isNotEmpty ? _findCookie(refHost) : null);
+    final host = Uri.tryParse(imageUrl)?.host.toLowerCase() ?? '';
+    final refHost =
+        referer != null ? (Uri.tryParse(referer)?.host.toLowerCase() ?? '') : '';
+    final cookie =
+        _findCookie(host) ?? (refHost.isNotEmpty ? _findCookie(refHost) : null);
+
+    // Certain sites and CDNs (e.g. comix.to with rotating lov.*.site CDNs) explicitly
+    // specify referrerpolicy="no-referrer" on their <img> tags. Their CDN rejects
+    // any request that carries the Referer with Cloudflare 403 Forbidden.
+    final omitReferer = refHost.contains('comix.to') ||
+        host.contains('.site') ||
+        host.contains('kkplayer');
+
     return {
       'User-Agent': userAgent,
-      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      'Accept':
+          'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
-      if (referer != null) 'Referer': referer,
+      if (referer != null && !omitReferer) 'Referer': referer,
       if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
     };
   }

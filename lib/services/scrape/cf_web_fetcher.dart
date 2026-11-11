@@ -265,6 +265,22 @@ class CfFileService extends FileService {
         first = await _http.get(url, headers: headers).timeout(const Duration(seconds: 10));
         final code = first.statusCode;
         if (code < 400 || !canFallback) return first;
+
+        // If the CDN or host refused the request with 403 or 401, check if it was due
+        // to the Referer header (e.g. CDNs enforcing referrerpolicy="no-referrer").
+        if ((code == 403 || code == 401 || code == 400) &&
+            headers.containsKey('Referer')) {
+          try {
+            final noRefHeaders = Map<String, String>.from(headers)..remove('Referer');
+            final noRefResp = await _http
+                .get(url, headers: noRefHeaders)
+                .timeout(const Duration(seconds: 10));
+            if (noRefResp.statusCode < 400) {
+              return noRefResp;
+            }
+          } catch (_) {}
+        }
+
         if (code != 403 && code != 401 && code != 429 && code != 503) {
           return first;
         }
@@ -284,7 +300,20 @@ class CfFileService extends FileService {
       return _BytesResponse(viaWeb.bytes, _extFor(viaWeb.contentType, url));
     }
 
-    // WebView failed too: let the caller see the original HTTP failure.
+    // WebView failed too: try without Referer as a final resilient fallback
+    if (headers.containsKey('Referer')) {
+      try {
+        final noRefHeaders = Map<String, String>.from(headers)..remove('Referer');
+        final noRefResp = await _http
+            .get(url, headers: noRefHeaders)
+            .timeout(const Duration(seconds: 10));
+        if (noRefResp.statusCode < 400) {
+          return noRefResp;
+        }
+      } catch (_) {}
+    }
+
+    // Let the caller see the original HTTP failure.
     if (first != null) return first;
     return _http.get(url, headers: headers);
   }
