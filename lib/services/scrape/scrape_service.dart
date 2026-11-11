@@ -281,6 +281,44 @@ class ScrapeService {
 
     /// Reads the current list of page image URLs from the live DOM.
     Future<List<String>> readUrls(InAppWebViewController c) async {
+      try {
+        final apiRes = await c.callAsyncJavaScript(
+          functionBody: r'''
+            try {
+              var init = document.getElementById('initial-data');
+              if (init && init.textContent) {
+                var d = JSON.parse(init.textContent);
+                var chapId = d.read && d.read.chapterId;
+                if (chapId) {
+                  var resp = await fetch('/api/v1/chapters/' + chapId, {
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+                  });
+                  if (resp.ok) {
+                    var json = await resp.json();
+                    var data = json.data || json;
+                    var list = data.iT || data.images || data.pages;
+                    if (Array.isArray(list) && list.length >= 2) {
+                      return list.map(function(item) {
+                        return (item && (item.H$ || item.url || item.src || (typeof item === 'string' ? item : null))) || '';
+                      }).filter(function(u) { return u && u.indexOf('http') === 0; });
+                    }
+                  }
+                }
+              }
+            } catch(e) {}
+            return null;
+          ''',
+        );
+        if (apiRes?.value is List) {
+          final list = (apiRes!.value as List)
+              .map((e) => e?.toString())
+              .whereType<String>()
+              .where((u) => u.startsWith('http'))
+              .toList();
+          if (list.length >= 2) return list;
+        }
+      } catch (_) {}
+
       final res = await c.evaluateJavascript(source: WebScraper.extractImagesJs);
       final out = <String>[];
       if (res is List) {
@@ -364,8 +402,8 @@ class ScrapeService {
           final complete = expected > 0 && pages.length >= expected;
           if (pages.length >= 2 &&
               (complete ||
-                  (bottom && stable >= 2) ||
-                  (pages.length >= 8 && stable >= 2))) {
+                  (bottom && stable >= 2 && (expected == 0 || pages.length >= expected)) ||
+                  (pages.length >= 10 && stable >= 3 && expected == 0))) {
             break;
           }
         } catch (_) {
@@ -409,7 +447,7 @@ class ScrapeService {
         // snapshot those to files. Prefer them whenever they cover at least
         // as many pages as the URL scan found.
         final rendered = await _captureRendered(c, url, atLeast: pages.length);
-        if (rendered.length >= 2) {
+        if (rendered.length >= 2 && rendered.length >= pages.length) {
           CfDiag.log(
             'using ${rendered.length} rendered pages (urls=${pages.length})',
           );
@@ -426,10 +464,12 @@ class ScrapeService {
 
         String? nextUrl;
         String? prevUrl;
+        bool isLatest = false;
         final availableChapters = <ChapterRef>[];
         if (nav is Map) {
           nextUrl = nav['next']?.toString();
           prevUrl = nav['prev']?.toString();
+          isLatest = nav['isLatest'] == true;
           final chList = nav['chapters'];
           if (chList is List) {
             for (final ch in chList) {
@@ -445,6 +485,16 @@ class ScrapeService {
           }
         }
 
+        final isLatestInCatalogue = isLatest ||
+            (availableChapters.isNotEmpty &&
+                GenericSiteAdapter.isCatalogueLatest(availableChapters, url));
+
+        final nextGuessed = !isLatestInCatalogue && nextUrl == null;
+        final nextChapterUrl = isLatestInCatalogue
+            ? null
+            : (nextUrl ?? UrlTools.stepChapter(url, 1));
+        final prevChapterUrl = prevUrl ?? UrlTools.stepChapter(url, -1);
+
         // Page passed Cloudflare -> remember its cookies for image requests.
         await CfSession.primeAll(url, pages);
 
@@ -455,16 +505,9 @@ class ScrapeService {
             pages: pages,
             title: finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
             chapterLabel: UrlTools.chapterLabel(url),
-            nextChapterUrl: (availableChapters.isNotEmpty &&
-                    GenericSiteAdapter.isCatalogueLatest(
-                        availableChapters, url))
-                ? null
-                : (nextUrl ?? UrlTools.stepChapter(url, 1)),
-            prevChapterUrl: prevUrl ?? UrlTools.stepChapter(url, -1),
-            nextGuessed: !(availableChapters.isNotEmpty &&
-                    GenericSiteAdapter.isCatalogueLatest(
-                        availableChapters, url)) &&
-                nextUrl == null,
+            nextChapterUrl: nextChapterUrl,
+            prevChapterUrl: prevChapterUrl,
+            nextGuessed: nextGuessed,
             isWebtoon: pages.length >= 2,
             availableChapters: availableChapters,
             coverUrl: metaCover is String && metaCover.startsWith('http')

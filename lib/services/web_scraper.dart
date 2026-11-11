@@ -142,6 +142,76 @@ class WebScraper {
       if (g && Array.isArray(g) && g.length >= 2 && typeof g[0] === 'string') return g;
     }
 
+    // 0b. SPA / React Fiber QueryCache extraction (comix.to, Next.js / TanStack readers)
+    try {
+      var rootEl = document.querySelector('#app-root, .rpage-body, .rpage, main[class*="rpage"], body');
+      if (rootEl) {
+        var fKey = Object.keys(rootEl).find(function(k) {
+          return k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$');
+        });
+        if (!fKey) {
+          var rEl = document.querySelector('.rpage, [class*="rpage"], #app-root > *');
+          if (rEl) {
+            fKey = Object.keys(rEl).find(function(k) {
+              return k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$');
+            });
+            if (fKey) rootEl = rEl;
+          }
+        }
+        if (fKey) {
+          var curr = rootEl[fKey];
+          var q = [curr];
+          var seenNodes = new Set();
+          while (q.length > 0 && q.length < 350) {
+            var n = q.shift();
+            if (!n || seenNodes.has(n)) continue;
+            seenNodes.add(n);
+
+            if (n.memoizedProps && n.memoizedProps.client && typeof n.memoizedProps.client.getQueryCache === 'function') {
+              var allQ = n.memoizedProps.client.getQueryCache().getAll();
+              for (var qi = 0; qi < allQ.length; qi++) {
+                var qState = allQ[qi].state && allQ[qi].state.data;
+                if (qState) {
+                  var list = qState.iT || qState.images || qState.pages;
+                  if (Array.isArray(list) && list.length >= 2) {
+                    var urls = list.map(function(item) {
+                      return (item && (item.H$ || item.url || item.src || (typeof item === 'string' ? item : null))) || '';
+                    }).filter(function(u) { return u && u.indexOf('http') === 0; });
+                    if (urls.length >= 2) return urls;
+                  }
+                }
+              }
+            }
+
+            var hook = n.memoizedState;
+            while (hook) {
+              if (hook.memoizedState && typeof hook.memoizedState === 'object') {
+                var hs = hook.memoizedState;
+                var candList = [hs, hs.data, hs.chapter];
+                for (var ci = 0; ci < candList.length; ci++) {
+                  var cand = candList[ci];
+                  if (cand) {
+                    var l = cand.iT || cand.images || cand.pages;
+                    if (Array.isArray(l) && l.length >= 2) {
+                      var urls2 = l.map(function(item) {
+                        return (item && (item.H$ || item.url || item.src || (typeof item === 'string' ? item : null))) || '';
+                      }).filter(function(u) { return u && u.indexOf('http') === 0; });
+                      if (urls2.length >= 2) return urls2;
+                    }
+                  }
+                }
+              }
+              hook = hook.next;
+            }
+
+            if (n.child) q.push(n.child);
+            if (n.sibling) q.push(n.sibling);
+            if (n.return && q.length < 50) q.push(n.return);
+          }
+        }
+      }
+    } catch (e) {}
+
     // 1. Known reader containers
     var containerSelectors = [
       '#readerarea', '.reading-content', '.container-chapter-reader', '#chapter-content',
@@ -299,6 +369,8 @@ class WebScraper {
   static const String expectedPagesJs = r'''
 (function() {
   try {
+    var rpages = document.querySelectorAll('.rpage-page[data-page], .rpage-page, div[data-page]');
+    if (rpages.length >= 2) return rpages.length;
     var t = (document.body && document.body.innerText) || '';
     var m = t.match(/(\d{1,4})\s*pages\b/i);
     return m ? parseInt(m[1]) : 0;
@@ -515,9 +587,9 @@ class WebScraper {
       }
     }
 
-    return { next: nextUrl, prev: prevUrl, chapters: chapters };
+    return { next: nextUrl, prev: prevUrl, chapters: chapters, isLatest: isLatest };
   } catch (e) {
-    return { next: null, prev: null, chapters: [] };
+    return { next: null, prev: null, chapters: [], isLatest: false };
   }
 })();
 ''';
