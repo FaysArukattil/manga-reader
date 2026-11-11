@@ -115,3 +115,11 @@ class AppThemeTokens extends ThemeExtension<AppThemeTokens> {
     );
   }
 }
+
+/// Shorthand for reading the current theme tokens anywhere in the UI:
+/// `context.tokens.textPrimary`. Falls back to the dark tokens (the app is
+/// dark-first) if the extension is missing, e.g. in a bare MaterialApp test.
+extension AppTokensX on BuildContext {
+  AppThemeTokens get tokens =>
+      Theme.of(this).extension<AppThemeTokens>() ?? AppThemeTokens.dark;
+}

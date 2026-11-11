@@ -9,29 +9,28 @@ import '../services/thumbnail_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/components/pressable_scale.dart';
 
-class SeriesCard extends StatelessWidget {
-  const SeriesCard({
-    super.key,
-    required this.series,
-    required this.onTap,
-    required this.onLongPress,
-  });
+/// Cover artwork for a [Series] with the same loading pipeline the reader
+/// uses (cookie/UA headers, cached file fallback, letter placeholder).
+/// Shared by the shelf grid, the "Continue reading" hero and the
+/// "New chapters" strip so covers behave identically everywhere.
+class SeriesCover extends StatelessWidget {
+  const SeriesCover({super.key, required this.series, this.memCacheWidth = 420});
 
   final Series series;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final int memCacheWidth;
 
   Widget _placeholder(BuildContext context) {
+    final t = context.tokens;
     final letter = series.title.isEmpty
         ? '?'
         : String.fromCharCode(series.title.runes.first).toUpperCase();
     return Container(
-      color: const Color(0xFF23252E),
+      color: t.surfaceCard,
       child: Center(
         child: Text(
           letter,
-          style: const TextStyle(
-            color: Colors.white38,
+          style: TextStyle(
+            color: t.textTertiary,
             fontSize: 32,
             fontWeight: FontWeight.bold,
           ),
@@ -47,18 +46,16 @@ class SeriesCard extends StatelessWidget {
       file,
       key: ValueKey(series.updatedAt.millisecondsSinceEpoch),
       fit: BoxFit.cover,
-      cacheWidth: 420,
+      cacheWidth: memCacheWidth,
       gaplessPlayback: true,
       errorBuilder: (_, __, ___) => _placeholder(context),
     );
   }
 
-  Widget _image(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     final cover = series.coverUrl;
     if (cover == null || cover.isEmpty) return _fallbackImage(context);
-    // Same pipeline as reader pages: real WebView UA + cf_clearance cookie,
-    // and a WebView download fallback for Cloudflare-protected hosts (plain
-    // HTTP gets 403 there, which is why covers never showed).
     return CachedNetworkImage(
       imageUrl: cover,
       cacheKey: cover,
@@ -68,74 +65,94 @@ class SeriesCard extends StatelessWidget {
         series.url.isNotEmpty ? series.url : null,
       ),
       fit: BoxFit.cover,
-      memCacheWidth: 420,
-      fadeInDuration: const Duration(milliseconds: 140),
+      memCacheWidth: memCacheWidth,
+      fadeInDuration: const Duration(milliseconds: 160),
       placeholder: (_, __) => _placeholder(context),
       errorWidget: (_, __, ___) => _fallbackImage(context),
     );
   }
+}
+
+/// A shelf tile. Intentionally quiet: cover, title, one line of context.
+/// (The old card also fired a favicon network request per tile and stacked
+/// three pills + a play icon on top of the art, which read as noise.)
+class SeriesCard extends StatelessWidget {
+  const SeriesCard({
+    super.key,
+    required this.series,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final Series series;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
+    final subtitle =
+        series.resumeLabel.isNotEmpty ? series.resumeLabel : series.host;
+    final showStatus = !series.hasNew && series.status != ReadStatus.reading;
+
     return PressableScale(
       onTap: onTap,
       onLongPress: onLongPress,
-      scaleDown: 0.95,
+      scaleDown: 0.96,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.30),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
             ),
           ],
         ),
         clipBehavior: Clip.antiAlias,
+        foregroundDecoration: series.hasNew
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.85),
+                  width: 1.6,
+                ),
+              )
+            : null,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            _image(context),
-            // Bottom gradient backdrop
+            SeriesCover(series: series),
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
-                  stops: [0.0, 0.45, 1.0],
+                  stops: [0.0, 0.42, 0.75],
                   colors: [
-                    Color(0xF0000000),
-                    Color(0x8A000000),
+                    Color(0xF2000000),
+                    Color(0x80000000),
                     Color(0x00000000),
                   ],
                 ),
               ),
             ),
-            // Top Pills: Chapter Resume and NEW Badge
-            if (series.resumeLabel.isNotEmpty)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: _Pill(text: series.resumeLabel),
-              ),
             if (series.hasNew)
               const Positioned(
-                top: 8,
-                right: 8,
-                child: _Pill(text: 'NEW', isAccent: true),
+                top: 10,
+                right: 10,
+                child: _Pill(text: 'NEW', accent: true),
               )
-            else if (series.status != ReadStatus.reading)
+            else if (showStatus)
               Positioned(
-                top: 8,
-                right: 8,
+                top: 10,
+                right: 10,
                 child: _Pill(text: series.status.label),
               ),
-            // Bottom Information
             Positioned(
-              left: 10,
-              right: 10,
-              bottom: 10,
+              left: 12,
+              right: 12,
+              bottom: 12,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,44 +163,21 @@ class SeriesCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
                       height: 1.2,
                     ),
                   ),
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      CachedNetworkImage(
-                        imageUrl:
-                            'https://www.google.com/s2/favicons?domain=${series.host}&sz=64',
-                        width: 13,
-                        height: 13,
-                        memCacheWidth: 64,
-                        errorWidget: (_, __, ___) => const Icon(
-                          Icons.public,
-                          size: 13,
-                          color: Colors.white70,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          series.host,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white60,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                      const Icon(
-                        Icons.play_circle_fill_rounded,
-                        size: 18,
-                        color: AppColors.primary,
-                      ),
-                    ],
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
@@ -196,35 +190,25 @@ class SeriesCard extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.text, this.isAccent = false});
+  const _Pill({required this.text, this.accent = false});
   final String text;
-  final bool isAccent;
+  final bool accent;
 
   @override
   Widget build(BuildContext context) {
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color:
-            isAccent ? AppColors.primary : Colors.black.withValues(alpha: 0.75),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: isAccent
-            ? [
-                BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.4),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : null,
+        color: accent ? AppColors.primary : Colors.black.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(10),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       child: Text(
         text,
         style: TextStyle(
-          color: isAccent ? Colors.black : Colors.white,
+          color: accent ? const Color(0xFF04130C) : Colors.white,
           fontSize: 10,
-          fontWeight: isAccent ? FontWeight.w800 : FontWeight.w500,
-          letterSpacing: isAccent ? 0.4 : 0,
+          fontWeight: accent ? FontWeight.w800 : FontWeight.w600,
+          letterSpacing: accent ? 0.5 : 0,
         ),
       ),
     );

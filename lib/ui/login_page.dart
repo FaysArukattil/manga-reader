@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -97,13 +95,13 @@ class _Content extends StatelessWidget {
         child:
             Transform.translate(offset: Offset(0, (1 - v) * 16), child: child),
       ),
-      child: Column(
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Spacer(),
-          const BrandLogo(size: 60, withGlow: false),
-          const SizedBox(height: 28),
-          const Text(
+          Spacer(),
+          BrandLogo(size: 60, withGlow: false),
+          SizedBox(height: 28),
+          Text(
             'Pick up where\nyou left off.',
             style: TextStyle(
               fontSize: 36,
@@ -113,8 +111,8 @@ class _Content extends StatelessWidget {
               color: Colors.white,
             ),
           ),
-          const SizedBox(height: 14),
-          const Text(
+          SizedBox(height: 14),
+          Text(
             'Sign in to keep your library and reading progress on every device. New here? Your account is created automatically.',
             style: TextStyle(
               fontSize: 15,
@@ -122,11 +120,11 @@ class _Content extends StatelessWidget {
               color: Colors.white54,
             ),
           ),
-          const Spacer(),
-          const SizedBox(height: 32),
-          const _GoogleButton(),
-          const SizedBox(height: 18),
-          const Center(
+          Spacer(),
+          SizedBox(height: 32),
+          _GoogleButton(),
+          SizedBox(height: 18),
+          Center(
             child: Text(
               'By continuing, you agree to our Terms and Privacy Policy.',
               textAlign: TextAlign.center,
@@ -236,55 +234,18 @@ class _ScreentonePainter extends CustomPainter {
 }
 
 // ===========================================================================
-// GOOGLE "G"
-// If you have the official asset, replace this with
-// Image.asset('assets/google_g.png', width: 22, height: 22).
+// GOOGLE "G" (Official Multi-Color Identity Asset)
 // ===========================================================================
 class _GoogleGIcon extends StatelessWidget {
   const _GoogleGIcon();
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
+    return Image.asset(
+      'assets/logo/google_logo.png',
       width: 22,
       height: 22,
-      child: CustomPaint(painter: _GoogleLogoPainter()),
+      filterQuality: FilterQuality.high,
     );
   }
-}
-
-class _GoogleLogoPainter extends CustomPainter {
-  const _GoogleLogoPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r = size.width / 2;
-    final strokeW = size.width * 0.22;
-    final rect =
-        Rect.fromCircle(center: Offset(cx, cy), radius: r).deflate(strokeW / 2);
-
-    final arc = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeW
-      ..isAntiAlias = true;
-
-    arc.color = const Color(0xFFEA4335);
-    canvas.drawArc(rect, -0.7, 1.4 * math.pi / math.pi, false, arc);
-    arc.color = const Color(0xFFFBBC05);
-    canvas.drawArc(rect, 0.7, 1.3, false, arc);
-    arc.color = const Color(0xFF34A853);
-    canvas.drawArc(rect, 2.0, 1.3, false, arc);
-    arc.color = const Color(0xFF4285F4);
-    canvas.drawArc(rect, 3.3, 1.8, false, arc);
-
-    canvas.drawRect(
-      Rect.fromLTWH(cx - 1, cy - strokeW / 2, r + 1, strokeW),
-      Paint()..color = const Color(0xFF4285F4),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

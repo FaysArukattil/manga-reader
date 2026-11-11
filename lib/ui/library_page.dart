@@ -1,5 +1,8 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../blocs/auth_bloc.dart';
@@ -8,8 +11,6 @@ import '../core/url_tools.dart';
 import '../data/library_repository.dart';
 import '../models/series.dart';
 import '../services/category_store.dart';
-import '../services/page_cache.dart';
-import '../services/scrape/cf_session.dart';
 import '../services/share_service.dart';
 import '../services/thumbnail_store.dart';
 import '../theme/app_colors.dart';
@@ -31,6 +32,9 @@ class LibraryPage extends StatefulWidget {
 
 class _LibraryPageState extends State<LibraryPage> {
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _scroll = ScrollController();
+  bool _fabExtended = true;
   late final ShareService _share;
 
   @override
@@ -38,14 +42,33 @@ class _LibraryPageState extends State<LibraryPage> {
     super.initState();
     _share = context.read<ShareService>();
     _share.addListener(_onShare);
+    _searchFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _scroll.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onShare());
   }
 
   @override
   void dispose() {
     _share.removeListener(_onShare);
+    _scroll.removeListener(_onScroll);
+    _scroll.dispose();
+    _searchFocus.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  /// Collapse the FAB to an icon while scrolling down, expand when scrolling
+  /// back up, so it never covers the last row of covers.
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final dir = _scroll.position.userScrollDirection;
+    if (dir == ScrollDirection.reverse && _fabExtended) {
+      setState(() => _fabExtended = false);
+    } else if (dir == ScrollDirection.forward && !_fabExtended) {
+      setState(() => _fabExtended = true);
+    }
   }
 
   void _snack(String text, {SnackBarAction? action}) {
@@ -220,13 +243,17 @@ class _LibraryPageState extends State<LibraryPage> {
               return ListTile(
                 leading: Icon(
                   isCurrent ? Icons.check_circle : Icons.folder_outlined,
-                  color: isCurrent ? AppColors.primary : Colors.white60,
+                  color: isCurrent
+                      ? AppColors.primary
+                      : sheetContext.tokens.textSecondary,
                 ),
                 title: Text(
                   cat,
                   style: TextStyle(
                     fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                    color: isCurrent ? AppColors.primary : Colors.white,
+                    color: isCurrent
+                        ? AppColors.primary
+                        : sheetContext.tokens.textPrimary,
                   ),
                 ),
                 onTap: () {
@@ -456,149 +483,335 @@ class _LibraryPageState extends State<LibraryPage> {
     final result = await auth.stream.firstWhere((s) => !s.busy);
     if (mounted && result.error != null) _snack(result.error!);
   }
+  // ---------------------------------------------------------------------------
+  // Category manager (themed)
+  // ---------------------------------------------------------------------------
 
   void _showCategoryManagerSheet() {
     final bloc = context.read<LibraryBloc>();
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xFF13151D),
+      backgroundColor: context.tokens.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Categories',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      _showAddCategoryDialog();
-                    },
-                    icon: const Icon(Icons.add, size: 16, color: Color(0xFF00FFA3)),
-                    label: const Text(
-                      'New',
-                      style: TextStyle(
-                        color: Color(0xFF00FFA3),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              BlocBuilder<LibraryBloc, LibraryState>(
-                builder: (context, state) => Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+      builder: (sheetContext) {
+        final t = sheetContext.tokens;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    ActionChip(
-                      label: const Text('All'),
-                      backgroundColor: state.categoryFilter == null
-                          ? const Color(0xFF00FFA3).withValues(alpha: 0.15)
-                          : const Color(0xFF1E202A),
-                      labelStyle: TextStyle(
-                        color: state.categoryFilter == null
-                            ? const Color(0xFF00FFA3)
-                            : Colors.white,
-                        fontWeight: state.categoryFilter == null
-                            ? FontWeight.bold
-                            : FontWeight.normal,
+                    Text(
+                      'Categories',
+                      style: TextStyle(
+                        color: t.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
-                      side: BorderSide(
-                        color: state.categoryFilter == null
-                            ? const Color(0xFF00FFA3)
-                            : Colors.white12,
-                      ),
+                    ),
+                    TextButton.icon(
                       onPressed: () {
                         Navigator.pop(sheetContext);
-                        bloc.add(const LibraryCategoryFilterChanged(null));
+                        _showAddCategoryDialog();
                       },
-                    ),
-                    for (final cat in state.categories)
-                      ActionChip(
-                        label: Text(cat),
-                        backgroundColor: state.categoryFilter == cat
-                            ? const Color(0xFF00FFA3).withValues(alpha: 0.15)
-                            : const Color(0xFF1E202A),
-                        labelStyle: TextStyle(
-                          color: state.categoryFilter == cat
-                              ? const Color(0xFF00FFA3)
-                              : Colors.white,
-                          fontWeight: state.categoryFilter == cat
-                              ? FontWeight.bold
-                              : FontWeight.normal,
+                      icon: Icon(Icons.add, size: 16, color: t.accent),
+                      label: Text(
+                        'New',
+                        style: TextStyle(
+                          color: t.accent,
+                          fontWeight: FontWeight.w700,
                         ),
-                        side: BorderSide(
-                          color: state.categoryFilter == cat
-                              ? const Color(0xFF00FFA3)
-                              : Colors.white12,
-                        ),
-                        onPressed: () {
-                          Navigator.pop(sheetContext);
-                          bloc.add(LibraryCategoryFilterChanged(cat));
-                        },
                       ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 4),
+                Text(
+                  'Tap to filter your shelf. Long-press a chip on the home '
+                  'screen to rename or delete it.',
+                  style: TextStyle(color: t.textSecondary, fontSize: 12.5),
+                ),
+                const SizedBox(height: 14),
+                BlocBuilder<LibraryBloc, LibraryState>(
+                  builder: (context, state) => Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _CategoryChip(
+                        label: 'All',
+                        selected: state.categoryFilter == null,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          bloc.add(const LibraryCategoryFilterChanged(null));
+                        },
+                      ),
+                      for (final cat in state.categories)
+                        _CategoryChip(
+                          label: cat,
+                          selected: state.categoryFilter == cat,
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            bloc.add(LibraryCategoryFilterChanged(cat));
+                          },
+                          onLongPress: () {
+                            Navigator.pop(sheetContext);
+                            _showCategoryOptions(cat);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  void _open(Series s) {
+    context.read<LibraryBloc>().add(LibraryMarkSeriesRead(s.id));
+    s.isMangaDex
+        ? MdDetailPage.openSeries(context, s)
+        : UnifiedReaderPage.openSeries(context, s);
+  }
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 5) return 'Still up?';
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    if (h < 22) return 'Good evening';
+    return 'Good night';
+  }
+
+  /// The series most worth resuming: last one actually opened, else the first
+  /// "reading" entry, else whatever is on the shelf.
+  Series _pickHero(List<Series> all) {
+    final opened = all.where((s) => s.lastReadAt != null).toList()
+      ..sort((a, b) => b.lastReadAt!.compareTo(a.lastReadAt!));
+    if (opened.isNotEmpty) return opened.first;
+    final reading = all.where((s) => s.status == ReadStatus.reading);
+    return reading.isNotEmpty ? reading.first : all.first;
+  }
+
+  void _checkUpdates() {
+    context.read<LibraryBloc>().add(const LibraryUpdatesRequested(force: true));
+    _snack('Checking for new chapters…');
+  }
+
+  void _clearFilters() {
+    _search.clear();
+    _searchFocus.unfocus();
+    final bloc = context.read<LibraryBloc>();
+    bloc
+      ..add(const LibraryQueryChanged(''))
+      ..add(const LibraryCategoryFilterChanged(null));
+    setState(() {});
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sections
+  // ---------------------------------------------------------------------------
+
+  Widget _buildHeader(LibraryState state, int newCount) {
+    final t = context.tokens;
+    final user = context.read<AuthBloc>().state.user;
+    final headline = state.all.isEmpty
+        ? 'Welcome to your shelf'
+        : newCount > 0
+            ? (newCount == 1
+                ? '1 new chapter waiting'
+                : '$newCount new chapters waiting')
+            : "What's next to read?";
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _greeting(),
+                  style: TextStyle(
+                    color: t.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: Text(
+                    headline,
+                    key: ValueKey(headline),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: t.textPrimary,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.6,
+                      height: 1.15,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          _RoundButton(
+            icon: Icons.explore_outlined,
+            tooltip: 'Discover',
+            onTap: () async {
+              await DiscoverPage.open(context);
+              if (mounted) {
+                context
+                    .read<LibraryBloc>()
+                    .add(const LibraryUpdatesRequested());
+              }
+            },
+          ),
+          const SizedBox(width: 8),
+          _RoundButton(
+            icon: Icons.notifications_none_rounded,
+            tooltip: 'Check for new chapters',
+            badge: newCount,
+            onTap: _checkUpdates,
+          ),
+          const SizedBox(width: 8),
+          _buildAccountMenu(user?.photoURL, user?.email),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountMenu(String? photoUrl, String? email) {
+    final t = context.tokens;
+    return PopupMenuButton<String>(
+      tooltip: 'Account',
+      offset: const Offset(0, 48),
+      color: t.surfaceCard,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: t.border),
+      ),
+      padding: EdgeInsets.zero,
+      onSelected: (v) {
+        if (v == 'out') {
+          context.read<AuthBloc>().add(const AuthSignOutRequested());
+        } else if (v == 'delete') {
+          _deleteAccount();
+        }
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Text(
+            email ?? 'Signed in as Guest',
+            style: TextStyle(color: t.textSecondary, fontSize: 12),
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: 'out',
+          child: Row(
+            children: [
+              Icon(Icons.logout_rounded, size: 18, color: t.textPrimary),
+              const SizedBox(width: 10),
+              Text('Sign out', style: TextStyle(color: t.textPrimary)),
             ],
           ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+              SizedBox(width: 10),
+              Text('Delete data', style: TextStyle(color: Colors.redAccent)),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        width: 42,
+        height: 42,
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: t.accent, width: 1.5),
+        ),
+        child: CircleAvatar(
+          backgroundColor: t.surfaceCard,
+          backgroundImage: photoUrl == null ? null : NetworkImage(photoUrl),
+          child: photoUrl == null
+              ? Icon(Icons.person, size: 18, color: t.textSecondary)
+              : null,
         ),
       ),
     );
   }
 
-  Widget _buildSpotlightSearchBar(LibraryBloc bloc) {
-    return Container(
-      height: 52,
+  /// Search + sort + category chips in ONE pinned block, so filtering is always
+  /// one thumb-reach away instead of scrolling past three stacked sections.
+  Widget _buildStickyControls(LibraryState state) {
+    final t = context.tokens;
+    final bloc = context.read<LibraryBloc>();
+    final focused = _searchFocus.hasFocus;
+
+    final search = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      height: 46,
+      padding: const EdgeInsets.only(left: 14, right: 6),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF0C2233),
-            Color(0xFF09141F),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: t.surface,
+        borderRadius: BorderRadius.circular(23),
         border: Border.all(
-          color: const Color(0xFF00FFA3).withValues(alpha: 0.25),
-          width: 1.0,
+          color: focused ? t.accent.withValues(alpha: 0.7) : t.border,
+          width: focused ? 1.4 : 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF00B4D8).withValues(alpha: 0.12),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: focused
+            ? [
+                BoxShadow(
+                  color: t.accent.withValues(alpha: 0.18),
+                  blurRadius: 14,
+                ),
+              ]
+            : null,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
+          Icon(
+            Icons.search_rounded,
+            size: 20,
+            color: focused ? t.accent : t.textTertiary,
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: _search,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              decoration: const InputDecoration(
-                hintText: 'Fantasy, Solo Leveling, Stephen King..',
-                hintStyle: TextStyle(color: Colors.white38, fontSize: 14),
+              focusNode: _searchFocus,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(color: t.textPrimary, fontSize: 14.5),
+              cursorColor: t.accent,
+              decoration: InputDecoration(
+                hintText: 'Search your shelf',
+                hintStyle: TextStyle(color: t.textTertiary, fontSize: 14.5),
                 border: InputBorder.none,
                 isDense: true,
               ),
@@ -609,516 +822,300 @@ class _LibraryPageState extends State<LibraryPage> {
             ),
           ),
           if (_search.text.isNotEmpty)
-            GestureDetector(
-              onTap: () {
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.close_rounded, size: 18, color: t.textSecondary),
+              onPressed: () {
                 _search.clear();
                 bloc.add(const LibraryQueryChanged(''));
                 setState(() {});
               },
-              child: const Padding(
-                padding: EdgeInsets.only(right: 6),
-                child: Icon(Icons.close_rounded, size: 18, color: Colors.white60),
-              ),
             ),
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF16324A),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.15),
-              ),
-            ),
-            child: const Icon(
-              Icons.search_rounded,
-              size: 18,
-              color: Color(0xFF00FFA3),
+        ],
+      ),
+    );
+
+    final sort = PopupMenuButton<LibrarySort>(
+      tooltip: 'Sort',
+      color: t.surfaceCard,
+      offset: const Offset(0, 48),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: t.border),
+      ),
+      initialValue: state.sort,
+      onSelected: (v) => bloc.add(LibrarySortChanged(v)),
+      itemBuilder: (_) => [
+        for (final entry in const {
+          LibrarySort.lastRead: 'Last read',
+          LibrarySort.title: 'Title A–Z',
+          LibrarySort.added: 'Recently added',
+        }.entries)
+          PopupMenuItem(
+            value: entry.key,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.check_rounded,
+                  size: 18,
+                  color: state.sort == entry.key
+                      ? t.accent
+                      : Colors.transparent,
+                ),
+                const SizedBox(width: 8),
+                Text(entry.value, style: TextStyle(color: t.textPrimary)),
+              ],
             ),
           ),
+      ],
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: t.surface,
+          shape: BoxShape.circle,
+          border: Border.all(color: t.border),
+        ),
+        child: Icon(Icons.swap_vert_rounded, size: 22, color: t.textSecondary),
+      ),
+    );
+
+    final chips = SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _CategoryChip(
+            label: 'All',
+            selected: state.categoryFilter == null,
+            onTap: () => bloc.add(const LibraryCategoryFilterChanged(null)),
+          ),
+          for (final cat in state.categories)
+            _CategoryChip(
+              label: cat,
+              selected: state.categoryFilter == cat,
+              onTap: () => bloc.add(LibraryCategoryFilterChanged(cat)),
+              onLongPress: () => _showCategoryOptions(cat),
+            ),
+          _CategoryChip(
+            icon: Icons.tune_rounded,
+            label: 'Manage',
+            selected: false,
+            onTap: _showCategoryManagerSheet,
+          ),
+        ],
+      ),
+    );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+          child: Row(
+            children: [
+              Expanded(child: search),
+              const SizedBox(width: 10),
+              sort,
+            ],
+          ),
+        ),
+        chips,
+        const SizedBox(height: 10),
+      ],
+    );
+  }
+
+  Widget _buildNewStrip(List<Series> fresh) {
+    final t = context.tokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+          child: Row(
+            children: [
+              Text(
+                'New chapters',
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _CountBadge(count: fresh.length, accent: true),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 156,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: fresh.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) => _MiniCover(
+              series: fresh[i],
+              onTap: () => _open(fresh[i]),
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+      ],
+    );
+  }
+
+  Widget _buildShelfTitle(LibraryState state) {
+    final t = context.tokens;
+    final filtering = state.query.trim().isNotEmpty || state.categoryFilter != null;
+    final title = state.categoryFilter ?? (filtering ? 'Results' : 'Your shelf');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+      child: Row(
+        children: [
+          Flexible(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: t.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _CountBadge(count: state.visible.length),
+          const Spacer(),
+          if (filtering)
+            TextButton(
+              onPressed: _clearFilters,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: t.accent,
+              ),
+              child: const Text(
+                'Clear',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildCategoriesSection(LibraryBloc bloc, LibraryState state) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Categories',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
-              ),
-            ),
-            GestureDetector(
-              onTap: _showCategoryManagerSheet,
-              child: const Text(
-                'See All >',
-                style: TextStyle(
-                  color: Colors.white54,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 38,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [
-              _FilterChip(
-                label: 'All',
-                selected: state.categoryFilter == null,
-                onTap: () => bloc.add(const LibraryCategoryFilterChanged(null)),
-              ),
-              for (final cat in state.categories)
-                _FilterChip(
-                  label: cat,
-                  selected: state.categoryFilter == cat,
-                  onTap: () => bloc.add(LibraryCategoryFilterChanged(cat)),
-                  onLongPress: () => _showCategoryOptions(cat),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildForYouSection(List<Series> topPicks, LibraryBloc bloc) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'For you',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.3,
-              ),
-            ),
-            GestureDetector(
-              onTap: () {},
-              child: const Text(
-                'See All >',
-                style: TextStyle(
-                  color: Colors.white54,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 205,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: topPicks.length,
-            itemBuilder: (context, i) {
-              final s = topPicks[i];
-              return _ContinueReadingCard(
-                series: s,
-                onTap: () {
-                  bloc.add(LibraryMarkSeriesRead(s.id));
-                  s.isMangaDex
-                      ? MdDetailPage.openSeries(context, s)
-                      : UnifiedReaderPage.openSeries(context, s);
-                },
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final bloc = context.read<LibraryBloc>();
-    final user = context.read<AuthBloc>().state.user;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF090A0E),
+      backgroundColor: t.bg,
       body: SafeArea(
         bottom: false,
         child: BlocBuilder<LibraryBloc, LibraryState>(
           builder: (context, state) {
             final width = MediaQuery.sizeOf(context).width;
-            final columns = (width / 180).floor().clamp(2, 6);
+            final columns = (width / 170).floor().clamp(2, 6);
+            final hasShelf = state.all.isNotEmpty;
+            final fresh = state.all.where((s) => s.hasNew).toList();
+            final showHighlights = !state.loading &&
+                hasShelf &&
+                state.query.trim().isEmpty &&
+                state.categoryFilter == null;
 
-            final forYouList = state.all
-                .where((s) => s.status == ReadStatus.reading)
-                .toList();
-            final topPicks = forYouList.isNotEmpty
-                ? forYouList
-                : state.all.take(6).toList();
+            final gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              childAspectRatio: 0.68,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 14,
+            );
 
             return RefreshIndicator(
-              color: const Color(0xFF00FFA3),
-              backgroundColor: const Color(0xFF13151D),
+              color: t.accent,
+              backgroundColor: t.surfaceCard,
               onRefresh: () async {
                 bloc.add(const LibraryUpdatesRequested(force: true));
-                await Future<void>.delayed(const Duration(milliseconds: 600));
+                await Future<void>.delayed(const Duration(milliseconds: 700));
               },
               child: CustomScrollView(
+                controller: _scroll,
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
                   SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Top Header Row
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              const BrandLogo(size: 44, withGlow: true),
-                              const SizedBox(width: 14),
-                              const Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Welcome to Manga Reader',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -0.4,
-                                        height: 1.2,
-                                      ),
-                                    ),
-                                    SizedBox(height: 2),
-                                    Text(
-                                      "What's next to read?",
-                                      style: TextStyle(
-                                        color: Color(0xFFA0A4B2),
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              // Header action buttons
-                              Row(
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.explore_outlined,
-                                      color: Colors.white70,
-                                      size: 22,
-                                    ),
-                                    tooltip: 'Browse MangaDex',
-                                    onPressed: () async {
-                                      await DiscoverPage.open(context);
-                                      if (mounted) {
-                                        bloc.add(const LibraryUpdatesRequested());
-                                      }
-                                    },
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.notifications_none_rounded,
-                                      color: Colors.white,
-                                      size: 24,
-                                    ),
-                                    tooltip: 'Check Updates',
-                                    onPressed: () {
-                                      bloc.add(
-                                        const LibraryUpdatesRequested(
-                                          force: true,
-                                        ),
-                                      );
-                                      _snack(
-                                        'Checking chapters for new releases...',
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(width: 4),
-                                  PopupMenuButton<String>(
-                                    tooltip: 'Account',
-                                    offset: const Offset(0, 42),
-                                    color: const Color(0xFF1E2028),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                      side: const BorderSide(
-                                        color: Colors.white12,
-                                      ),
-                                    ),
-                                    icon: Container(
-                                      padding: const EdgeInsets.all(2),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: const Color(0xFF00FFA3),
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      child: CircleAvatar(
-                                        radius: 14,
-                                        backgroundImage: user?.photoURL == null
-                                            ? null
-                                            : NetworkImage(user!.photoURL!),
-                                        child: user?.photoURL == null
-                                            ? const Icon(
-                                                Icons.person,
-                                                size: 16,
-                                                color: Colors.white70,
-                                              )
-                                            : null,
-                                      ),
-                                    ),
-                                    onSelected: (v) {
-                                      if (v == 'out') {
-                                        context
-                                            .read<AuthBloc>()
-                                            .add(const AuthSignOutRequested());
-                                      } else if (v == 'delete') {
-                                        _deleteAccount();
-                                      }
-                                    },
-                                    itemBuilder: (_) => [
-                                      PopupMenuItem<String>(
-                                        enabled: false,
-                                        child: Text(
-                                          user?.email ?? 'Signed in as Guest',
-                                          style: const TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                      const PopupMenuDivider(),
-                                      const PopupMenuItem<String>(
-                                        value: 'out',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.logout_rounded,
-                                              size: 16,
-                                              color: Colors.white,
-                                            ),
-                                            SizedBox(width: 8),
-                                            Text(
-                                              'Sign out',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const PopupMenuItem<String>(
-                                        value: 'delete',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.delete_outline,
-                                              size: 16,
-                                              color: Colors.redAccent,
-                                            ),
-                                            SizedBox(width: 8),
-                                            Text(
-                                              'Delete data',
-                                              style: TextStyle(
-                                                color: Colors.redAccent,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-
-                          // Spotlight Search Container
-                          _buildSpotlightSearchBar(bloc),
-                          const SizedBox(height: 24),
-
-                          // Categories Header & Chips
-                          _buildCategoriesSection(bloc, state),
-                          const SizedBox(height: 24),
-
-                          // For You Carousel
-                          if (_search.text.isEmpty && topPicks.isNotEmpty) ...[
-                            _buildForYouSection(topPicks, bloc),
-                            const SizedBox(height: 24),
-                          ],
-
-                          // "Your Shelf" Section Header
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  const Text(
-                                    'Your Shelf',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: -0.3,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF1E202A),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      '${state.visible.length}',
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              PopupMenuButton<LibrarySort>(
-                                tooltip: 'Sort',
-                                color: const Color(0xFF1E2028),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: const BorderSide(
-                                    color: Colors.white12,
-                                  ),
-                                ),
-                                icon: const Icon(
-                                  Icons.swap_vert_rounded,
-                                  color: Colors.white70,
-                                  size: 22,
-                                ),
-                                onSelected: (v) =>
-                                    bloc.add(LibrarySortChanged(v)),
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: LibrarySort.lastRead,
-                                    child: Text(
-                                      'Last read',
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: LibrarySort.title,
-                                    child: Text(
-                                      'Title',
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: LibrarySort.added,
-                                    child: Text(
-                                      'Recently added',
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                        ],
+                    child: _buildHeader(state, fresh.length),
+                  ),
+                  if (showHighlights)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
+                        child: _ContinueHero(
+                          series: _pickHero(state.all),
+                          onTap: _open,
+                        ),
                       ),
                     ),
-                  ),
-
-                  // Main Grid / Empty / Loading State
+                  if (showHighlights && fresh.isNotEmpty)
+                    SliverToBoxAdapter(child: _buildNewStrip(fresh)),
+                  if (hasShelf)
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _PinnedBarDelegate(
+                        height: 4 + 46 + 10 + 36 + 10,
+                        background: t.bg,
+                        child: _buildStickyControls(state),
+                      ),
+                    ),
+                  if (hasShelf) SliverToBoxAdapter(child: _buildShelfTitle(state)),
                   if (state.loading)
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                       sliver: SliverGrid(
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: columns,
-                          childAspectRatio: 0.68,
-                          mainAxisSpacing: 14,
-                          crossAxisSpacing: 14,
-                        ),
+                        gridDelegate: gridDelegate,
                         delegate: SliverChildBuilderDelegate(
                           (_, __) => const ShimmerBox(
                             width: double.infinity,
                             height: double.infinity,
-                            borderRadius: 16,
+                            borderRadius: 18,
                           ),
                           childCount: 6,
                         ),
                       ),
                     )
-                  else if (state.all.isEmpty)
-                    const SliverToBoxAdapter(
-                      child: _EmptyState(),
+                  else if (!hasShelf)
+                    SliverToBoxAdapter(
+                      child: _EmptyState(onAdd: () => _openForm()),
                     )
                   else if (state.visible.isEmpty)
-                    const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 40),
-                        child: Center(
-                          child: Text(
-                            'No matching manga found',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
+                    SliverToBoxAdapter(
+                      child: _NoResults(onClear: _clearFilters),
                     )
                   else
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
                       sliver: SliverGrid(
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: columns,
-                          childAspectRatio: 0.68,
-                          mainAxisSpacing: 14,
-                          crossAxisSpacing: 14,
-                        ),
+                        gridDelegate: gridDelegate,
                         delegate: SliverChildBuilderDelegate(
                           (context, i) {
                             final s = state.visible[i];
-                            return SeriesCard(
-                              key: ValueKey(s.id),
-                              series: s,
-                              onTap: () {
-                                bloc.add(LibraryMarkSeriesRead(s.id));
-                                s.isMangaDex
-                                    ? MdDetailPage.openSeries(context, s)
-                                    : UnifiedReaderPage.openSeries(context, s);
-                              },
-                              onLongPress: () => _showActions(s),
+                            return _EntranceFade(
+                              key: ValueKey('fade_${s.id}'),
+                              index: i,
+                              child: SeriesCard(
+                                key: ValueKey(s.id),
+                                series: s,
+                                onTap: () => _open(s),
+                                onLongPress: () => _showActions(s),
+                              ),
                             );
                           },
                           childCount: state.visible.length,
@@ -1132,92 +1129,53 @@ class _LibraryPageState extends State<LibraryPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF00FFA3),
-        foregroundColor: const Color(0xFF090A0E),
-        elevation: 6,
+        isExtended: _fabExtended,
+        backgroundColor: t.accent,
+        foregroundColor: const Color(0xFF04130C),
+        elevation: 4,
+        tooltip: 'Paste a link',
         onPressed: () => _openForm(),
-        icon: const Icon(Icons.add_rounded, size: 22),
+        icon: const Icon(Icons.add_link_rounded, size: 22),
         label: const Text(
-          'Add Link',
-          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.3),
+          'Add link',
+          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.2),
         ),
       ),
     );
   }
 }
 
-class _ContinueReadingCard extends StatelessWidget {
-  const _ContinueReadingCard({
-    required this.series,
-    required this.onTap,
-  });
+// =============================================================================
+// Pieces
+// =============================================================================
+
+/// Big "Continue reading" card: blurred cover backdrop, sharp cover thumb,
+/// one obvious Resume action. This is the single most important element on the
+/// screen, so it gets the most visual weight.
+class _ContinueHero extends StatelessWidget {
+  const _ContinueHero({required this.series, required this.onTap});
 
   final Series series;
-  final VoidCallback onTap;
+  final void Function(Series) onTap;
 
   @override
   Widget build(BuildContext context) {
-    final cover = series.coverUrl;
-    final thumb = context.read<ThumbnailStore>().fileFor(series.id);
-
-    Widget imageWidget;
-    if (cover != null && cover.isNotEmpty) {
-      imageWidget = CachedNetworkImage(
-        imageUrl: cover,
-        cacheKey: cover,
-        cacheManager: PageCache.instance,
-        httpHeaders: CfSession.imageHeaders(
-          cover,
-          series.url.isNotEmpty ? series.url : null,
-        ),
-        fit: BoxFit.cover,
-        errorWidget: (_, __, ___) => thumb != null
-            ? Image.file(thumb, fit: BoxFit.cover)
-            : Container(
-                color: const Color(0xFF1F222E),
-                child: Center(
-                  child: Text(
-                    series.title.isEmpty ? '?' : series.title[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-      );
-    } else if (thumb != null) {
-      imageWidget = Image.file(thumb, fit: BoxFit.cover);
-    } else {
-      imageWidget = Container(
-        color: const Color(0xFF1F222E),
-        child: Center(
-          child: Text(
-            series.title.isEmpty ? '?' : series.title[0].toUpperCase(),
-            style: const TextStyle(
-              color: Colors.white38,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      );
-    }
+    final t = context.tokens;
+    final resume = series.resumeLabel;
 
     return PressableScale(
-      onTap: onTap,
-      scaleDown: 0.95,
+      onTap: () => onTap(series),
+      scaleDown: 0.98,
       child: Container(
-        width: 140,
-        margin: const EdgeInsets.only(right: 14),
+        height: 168,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
+          color: t.surfaceCard,
+          borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.45),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
@@ -1225,96 +1183,107 @@ class _ContinueReadingCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            imageWidget,
-            const DecoratedBox(
+            ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: Transform.scale(
+                scale: 1.3,
+                child: SeriesCover(series: series, memCacheWidth: 300),
+              ),
+            ),
+            DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  stops: [0.0, 0.55, 1.0],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
                   colors: [
-                    Color(0xF5000000),
-                    Color(0x99000000),
-                    Color(0x00000000),
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.78),
                   ],
                 ),
               ),
             ),
-            if (series.resumeLabel.isNotEmpty)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.75),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    series.resumeLabel,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            Positioned(
-              left: 10,
-              right: 10,
-              bottom: 10,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
                 children: [
-                  Text(
-                    series.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      height: 1.2,
+                  AspectRatio(
+                    aspectRatio: 0.68,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: SeriesCover(series: series, memCacheWidth: 360),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          series.host,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'CONTINUE READING',
+                          style: TextStyle(
+                            color: t.accent,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          series.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            height: 1.18,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          resume.isNotEmpty ? resume : series.host,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: Colors.white60,
-                            fontSize: 11,
+                            color: Colors.white70,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                      ),
-                      Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFF00FFA3),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF00FFA3)
-                                  .withValues(alpha: 0.4),
-                              blurRadius: 6,
-                            ),
-                          ],
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.accent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.play_arrow_rounded,
+                                size: 18,
+                                color: Color(0xFF04130C),
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Resume',
+                                style: TextStyle(
+                                  color: Color(0xFF04130C),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          size: 16,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1326,57 +1295,82 @@ class _ContinueReadingCard extends StatelessWidget {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.onLongPress,
-  });
+class _MiniCover extends StatelessWidget {
+  const _MiniCover({required this.series, required this.onTap});
 
-  final String label;
-  final bool selected;
+  final Series series;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    final t = context.tokens;
+    return PressableScale(
+      onTap: onTap,
+      scaleDown: 0.95,
+      child: SizedBox(
+        width: 104,
+        child: Container(
           decoration: BoxDecoration(
-            color: selected
-                ? const Color(0xFF00FFA3).withValues(alpha: 0.15)
-                : const Color(0xFF13151D),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected
-                  ? const Color(0xFF00FFA3).withValues(alpha: 0.6)
-                  : Colors.white.withValues(alpha: 0.1),
-              width: selected ? 1.2 : 0.8,
-            ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFF00FFA3).withValues(alpha: 0.2),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: t.accent.withValues(alpha: 0.8), width: 1.4),
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? const Color(0xFF00FFA3) : Colors.white70,
-              fontSize: 13,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              SeriesCover(series: series, memCacheWidth: 280),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    stops: [0.0, 0.5, 1.0],
+                    colors: [
+                      Color(0xE6000000),
+                      Color(0x66000000),
+                      Color(0x00000000),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 6,
+                left: 6,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: t.accent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'NEW',
+                    style: TextStyle(
+                      color: Color(0xFF04130C),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: 8,
+                child: Text(
+                  series.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1384,53 +1378,335 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+/// Uniform circular header button with an optional count badge.
+class _RoundButton extends StatelessWidget {
+  const _RoundButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.badge = 0,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final int badge;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const BrandLogo(size: 76, withGlow: true),
-            const SizedBox(height: 20),
-            const Text(
-              'Your shelf is waiting',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
-                color: Colors.white,
+    final t = context.tokens;
+    return Tooltip(
+      message: tooltip,
+      child: PressableScale(
+        onTap: onTap,
+        scaleDown: 0.9,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: t.surface,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: t.border),
+                ),
+                child: Icon(icon, size: 21, color: t.textPrimary),
               ),
+              if (badge > 0)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    constraints:
+                        const BoxConstraints(minWidth: 18, minHeight: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: t.accent,
+                      shape: badge > 9 ? BoxShape.rectangle : BoxShape.circle,
+                      borderRadius:
+                          badge > 9 ? BorderRadius.circular(9) : null,
+                      border: Border.all(color: t.bg, width: 2),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      badge > 99 ? '99+' : '$badge',
+                      style: const TextStyle(
+                        color: Color(0xFF04130C),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count, this.accent = false});
+
+  final int count;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: accent ? t.accent.withValues(alpha: 0.16) : t.surfaceCard,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          color: accent ? t.accent : t.textSecondary,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.onLongPress,
+    this.icon,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final fg = selected ? const Color(0xFF04130C) : t.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        onLongPress: onLongPress,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? t.accent : t.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? t.accent : t.border,
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Share any chapter link from Chrome to Manga Reader, or tap "+ Add Link" to paste a manga, webtoon, or novel URL.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white60,
-                fontSize: 13.5,
-                height: 1.45,
-              ),
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton.icon(
-              onPressed: () => DiscoverPage.open(context),
-              icon: const Icon(Icons.explore_rounded, size: 18),
-              label: const Text('Explore MangaDex Titles'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF00FFA3),
-                side: const BorderSide(color: Color(0xFF00FFA3)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 15, color: fg),
+                const SizedBox(width: 5),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// Fades + slides a grid tile in the first time it is built, with a small
+/// stagger so the shelf "settles" instead of popping in.
+class _EntranceFade extends StatelessWidget {
+  const _EntranceFade({super.key, required this.index, required this.child});
+
+  final int index;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final ms = 280 + (index % 8) * 55;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: ms),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, child) => Opacity(
+        opacity: v,
+        child: Transform.translate(offset: Offset(0, (1 - v) * 18), child: child),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
+  _PinnedBarDelegate({
+    required this.height,
+    required this.background,
+    required this.child,
+  });
+
+  final double height;
+  final Color background;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: background,
+      elevation: 0,
+      child: OverflowBox(
+        alignment: Alignment.topCenter,
+        minHeight: 0,
+        maxHeight: height,
+        child: child,
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _PinnedBarDelegate old) => true;
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onAdd});
+
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const BrandLogo(size: 84, withGlow: true),
+          const SizedBox(height: 22),
+          Text(
+            'Your shelf is empty',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+              color: t.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Paste a link to any manga or webtoon chapter and it opens here as a clean reader. '
+            'You can also share a link from your browser straight to this app.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: t.textSecondary,
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_link_rounded, size: 20),
+            label: const Text('Paste a link'),
+            style: FilledButton.styleFrom(
+              backgroundColor: t.accent,
+              foregroundColor: const Color(0xFF04130C),
+              minimumSize: const Size(200, 50),
+              textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(26),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: () => DiscoverPage.open(context),
+            icon: Icon(Icons.explore_outlined, size: 18, color: t.accent),
+            label: Text(
+              'Or browse MangaDex',
+              style: TextStyle(color: t.accent, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoResults extends StatelessWidget {
+  const _NoResults({required this.onClear});
+
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 32),
+      child: Column(
+        children: [
+          Icon(Icons.search_off_rounded, size: 44, color: t.textTertiary),
+          const SizedBox(height: 12),
+          Text(
+            'Nothing matches that',
+            style: TextStyle(
+              color: t.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Try a different word or clear your filters.',
+            style: TextStyle(color: t.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton(
+            onPressed: onClear,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: t.accent,
+              side: BorderSide(color: t.accent),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+            child: const Text('Clear filters'),
+          ),
+        ],
       ),
     );
   }

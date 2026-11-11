@@ -24,7 +24,7 @@ class BrandLogo extends StatelessWidget {
         boxShadow: withGlow
             ? [
                 BoxShadow(
-                  color: const Color(0xFF00FFA3).withValues(alpha: 0.35),
+                  color: const Color(0xFF00C875).withValues(alpha: 0.30),
                   blurRadius: size * 0.35,
                   offset: Offset(0, size * 0.08),
                 ),
