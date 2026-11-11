@@ -315,6 +315,7 @@ class ScrapeService {
       var bottom = false;
       var expected = 0;
       var stillChallenge = false;
+      var challengeAttempts = 0;
 
       while (DateTime.now().isBefore(deadline) && !completer.isCompleted) {
         try {
@@ -324,10 +325,22 @@ class ScrapeService {
             // Managed challenges clear themselves in a few seconds.
             challengeSeen = true;
             stillChallenge = true;
+            challengeAttempts++;
+            // If the challenge does not auto-resolve in ~4 seconds (6 attempts * 700ms),
+            // it is an interactive Turnstile / human check requiring user interaction.
+            // Yield immediately to the in-app verification screen instead of hanging at 100%!
+            if (challengeAttempts >= 6) {
+              CfDiag.log(
+                'headless interactive challenge detected ($challengeAttempts attempts) -> requesting user verification',
+              );
+              finish(_needsVerification(url));
+              return;
+            }
             await Future<void>.delayed(const Duration(milliseconds: 700));
             continue;
           }
           stillChallenge = false;
+          challengeAttempts = 0;
 
           // Fast check: if expected pages are known and already rendered, exit immediately
           pages = await readUrls(c);

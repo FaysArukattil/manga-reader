@@ -156,12 +156,14 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
 
   Future<void> _verifyNext(String url) async {
     final scrape = context.read<ScrapeService>();
-    final result = await showModalBottomSheet<dynamic>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      enableDrag: false,
-      builder: (ctx) => CfVerificationSheet(url: url),
+    final result = await Navigator.of(context).push<dynamic>(
+      MaterialPageRoute(
+        builder: (ctx) => CfVerificationSheet(
+          url: url,
+          seriesTitle: widget.series.title,
+          isFullScreen: true,
+        ),
+      ),
     );
     if (result is CfVerifiedPage && result.pages.length >= 2) {
       await scrape.cacheVerified(
@@ -1620,7 +1622,7 @@ class _LoadingBookPlaceholder extends StatelessWidget {
   }
 }
 
-class _VerificationRequiredView extends StatefulWidget {
+class _VerificationRequiredView extends StatelessWidget {
   const _VerificationRequiredView({
     required this.url,
     required this.seriesTitle,
@@ -1636,121 +1638,27 @@ class _VerificationRequiredView extends StatefulWidget {
   final ValueChanged<List<String>>? onPagesResolved;
 
   @override
-  State<_VerificationRequiredView> createState() =>
-      _VerificationRequiredViewState();
-}
-
-class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
-  static final Set<String> _autoOpenedUrls = {};
-  bool _modalOpened = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // Auto-open only once per URL to prevent infinite popup loops
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_modalOpened && !_autoOpenedUrls.contains(widget.url)) {
-        _autoOpenedUrls.add(widget.url);
-        _openModal();
-      }
-    });
-  }
-
-  Future<void> _openModal() async {
-    setState(() => _modalOpened = true);
-    final result = await showModalBottomSheet<dynamic>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      enableDrag: false,
-      builder: (ctx) => CfVerificationSheet(url: widget.url),
-    );
-
-    if (result is CfVerifiedPage) {
-      // Remember it forever: this chapter will never ask for verification
-      // again, and the reader can continue to the next/previous chapter.
-      if (result.pages.length >= 2 && mounted) {
-        await context.read<ScrapeService>().cacheVerified(
-              result.url,
-              pages: result.pages,
-              title: result.title,
-              nextUrl: result.nextUrl,
-              prevUrl: result.prevUrl,
-              chapters: result.chapters,
-            );
-      }
-      widget.onVerified();
-    } else if (result == true) {
-      widget.onVerified();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF00B96B).withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.security_rounded,
-                color: Color(0xFF00B96B),
-                size: 48,
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Security Verification Required',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '${widget.seriesTitle} requires Cloudflare / Turnstile human verification before displaying chapter pages.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 13,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _openModal,
-              icon: const Icon(Icons.verified_user_outlined, size: 18),
-              label: const Text('Verify & Open Book'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00B96B),
-                foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: widget.onCancel,
-              child: const Text(
-                'Go Back to Library',
-                style: TextStyle(color: Colors.white38),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return CfVerificationSheet(
+      url: url,
+      seriesTitle: seriesTitle,
+      isFullScreen: true,
+      onClose: onCancel,
+      onVerified: (verified) async {
+        if (verified.pages.length >= 2) {
+          await context.read<ScrapeService>().cacheVerified(
+                verified.url,
+                pages: verified.pages,
+                title: verified.title,
+                nextUrl: verified.nextUrl,
+                prevUrl: verified.prevUrl,
+                chapters: verified.chapters,
+              );
+          onPagesResolved?.call(verified.pages);
+        } else {
+          onVerified();
+        }
+      },
     );
   }
 }

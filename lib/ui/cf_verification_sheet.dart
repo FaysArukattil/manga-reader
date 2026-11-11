@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/scrape/cf_session.dart';
 import '../services/scrape/site_adapter.dart';
 import '../services/web_scraper.dart';
+import 'ad_block.dart';
 
 /// What the sheet read from the page once it was unlocked. The caller stores
 /// it in the scrape cache so this chapter is never verified again.
@@ -27,22 +28,23 @@ class CfVerifiedPage {
   final List<ChapterRef> chapters;
 }
 
-/// Bottom sheet that shows the real site so the user can pass Cloudflare /
-/// Turnstile once. Pops with:
-///   * [CfVerifiedPage]  -> challenge cleared; pages/nav read from the page
-///   * `false` / null    -> cancelled
-///
-/// Why the old one looped:
-///  - it considered "a cf_clearance cookie exists" as solved, so a stale
-///    cookie closed the sheet instantly, then scraping hit the challenge again;
-///  - it spoofed a user-agent that didn't match the real WebView, so
-///    Cloudflare kept re-challenging;
-///  - it matched `challenge-platform` in the DOM, which is present on normal
-///    Cloudflare pages, so even a solved page looked like a challenge.
+/// In-app verification view that renders the real site so the user can pass
+/// Cloudflare / Turnstile challenges cleanly, without rogue popups or ads.
 class CfVerificationSheet extends StatefulWidget {
-  const CfVerificationSheet({super.key, required this.url});
+  const CfVerificationSheet({
+    super.key,
+    required this.url,
+    this.seriesTitle,
+    this.onVerified,
+    this.onClose,
+    this.isFullScreen = false,
+  });
 
   final String url;
+  final String? seriesTitle;
+  final ValueChanged<CfVerifiedPage>? onVerified;
+  final VoidCallback? onClose;
+  final bool isFullScreen;
 
   @override
   State<CfVerificationSheet> createState() => _CfVerificationSheetState();
@@ -61,7 +63,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
     super.initState();
     // Poll for the whole life of the sheet (the user may take a while).
     _poll = Timer.periodic(
-      const Duration(milliseconds: 800),
+      const Duration(milliseconds: 650),
       (_) => _checkIfSolved(),
     );
   }
@@ -104,7 +106,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
             await _web?.evaluateJavascript(source: WebScraper.scrollStepJs);
         if (atBottom == true) bottom = true;
       } catch (_) {}
-      await Future<void>.delayed(const Duration(milliseconds: 450));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
       pages = await _readPages();
       if (pages.length == last) {
         stable++;
@@ -145,21 +147,25 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
     // Image downloads must send cf_clearance + the matching UA.
     await CfSession.primeAll(widget.url, pages);
     CfSession.webViewOnlyHosts.add(Uri.tryParse(widget.url)?.host ?? '');
-    if (!mounted) return;
-    Navigator.of(context).pop(
-      CfVerifiedPage(
-        url: widget.url,
-        pages: pages,
-        title: title,
-        nextUrl: next,
-        prevUrl: prev,
-        chapters: chapters,
-      ),
+
+    final result = CfVerifiedPage(
+      url: widget.url,
+      pages: pages,
+      title: title,
+      nextUrl: next,
+      prevUrl: prev,
+      chapters: chapters,
     );
+
+    if (widget.onVerified != null) {
+      widget.onVerified!(result);
+    } else if (mounted) {
+      Navigator.of(context).pop(result);
+    }
   }
 
   /// Solved = the page in front of us is a normal page (no challenge markers),
-  /// fully loaded, for two consecutive polls. A leftover cookie is irrelevant.
+  /// fully loaded, for two consecutive polls.
   Future<void> _checkIfSolved() async {
     if (_done || _checking || _web == null) return;
     _checking = true;
@@ -185,120 +191,173 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
     }
   }
 
+  void _handleClose() {
+    _done = true;
+    _poll?.cancel();
+    if (widget.onClose != null) {
+      widget.onClose!();
+    } else if (mounted) {
+      Navigator.pop(context, false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final host = Uri.tryParse(widget.url)?.host ?? widget.url;
+    final baseHost = Uri.tryParse(widget.url)?.host.toLowerCase() ?? '';
 
     return Container(
-      height: MediaQuery.of(context).size.height * 0.88,
-      decoration: const BoxDecoration(
-        color: Color(0xFF141416),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.shield_outlined,
-                    color: Color(0xFF00B96B), size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Security Verification',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        host,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 11),
-                      ),
-                    ],
+      color: const Color(0xFF0D0E11),
+      child: SafeArea(
+        top: widget.isFullScreen,
+        bottom: widget.isFullScreen,
+        child: Column(
+          children: [
+            // Top App Bar
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00C875).withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.shield_rounded,
+                        color: Color(0xFF00C875), size: 18),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.refresh,
-                      color: Colors.white70, size: 20),
-                  tooltip: 'Reload',
-                  onPressed: () => _web?.reload(),
-                ),
-                TextButton(
-                  onPressed: () => _finish(),
-                  child: const Text(
-                    'Done',
-                    style: TextStyle(
-                      color: Color(0xFF00B96B),
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.seriesTitle ?? 'Security Verification',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          host,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                IconButton(
-                  icon:
-                      const Icon(Icons.close, color: Colors.white70, size: 20),
-                  onPressed: () {
-                    _done = true;
-                    _poll?.cancel();
-                    Navigator.pop(context, false);
-                  },
-                ),
-              ],
-            ),
-          ),
-          if (_progress < 1.0)
-            LinearProgressIndicator(
-              value: _progress,
-              minHeight: 2,
-              backgroundColor: Colors.transparent,
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFF00B96B)),
-            ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.white.withValues(alpha: 0.04),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, size: 14, color: Colors.white54),
-                SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Complete the "Verify you are human" check below. It continues automatically once the page loads.',
-                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded,
+                        color: Colors.white70, size: 20),
+                    tooltip: 'Reload',
+                    onPressed: () => _web?.reload(),
                   ),
+                  TextButton(
+                    onPressed: () => _finish(),
+                    child: const Text(
+                      'Done',
+                      style: TextStyle(
+                        color: Color(0xFF00C875),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white70, size: 22),
+                    tooltip: 'Close',
+                    onPressed: _handleClose,
+                  ),
+                ],
+              ),
+            ),
+            if (_progress < 1.0)
+              LinearProgressIndicator(
+                value: _progress,
+                minHeight: 2.5,
+                backgroundColor: Colors.transparent,
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(Color(0xFF00C875)),
+              ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+              color: Colors.white.withValues(alpha: 0.04),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, size: 13, color: Color(0xFF00C875)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Tap "Verify you are human" below. Shelfmark will automatically load the chapter once verified.',
+                      style: TextStyle(color: Colors.white70, fontSize: 11.5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: InAppWebView(
+                initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+                initialSettings: CfSession.webViewSettings(
+                  contentBlockers: buildContentBlockers(),
+                  popups: false,
                 ),
-              ],
+                onWebViewCreated: (c) => _web = c,
+                onProgressChanged: (_, p) {
+                  if (mounted) setState(() => _progress = p / 100);
+                },
+                onLoadStop: (controller, loadedUrl) async {
+                  // Center the Turnstile / Cloudflare challenge widget on mobile screen
+                  try {
+                    await controller.evaluateJavascript(source: r'''
+                      (function() {
+                        try {
+                          var el = document.querySelector('#challenge-stage, .cf-turnstile, iframe[src*="challenges.cloudflare.com"], #cf-wrapper, #challenge-form');
+                          if (el) {
+                            el.scrollIntoView({behavior: 'smooth', block: 'center'});
+                          }
+                        } catch(e) {}
+                      })();
+                    ''');
+                  } catch (_) {}
+                  _checkIfSolved();
+                },
+                shouldOverrideUrlLoading: (controller, navigationAction) async {
+                  final reqUrl = navigationAction.request.url;
+                  if (reqUrl == null) return NavigationActionPolicy.ALLOW;
+                  final targetHost = reqUrl.host.toLowerCase();
+
+                  // Allow requests within the site domain, cloudflare challenge, or turnstile
+                  final isAllowed = targetHost.isEmpty ||
+                      targetHost == baseHost ||
+                      targetHost.endsWith('.$baseHost') ||
+                      targetHost.contains('cloudflare') ||
+                      targetHost.contains('turnstile') ||
+                      targetHost.contains('recaptcha') ||
+                      targetHost.contains('hcaptcha');
+
+                  if (!isAllowed) {
+                    // Block rogue ad redirects
+                    return NavigationActionPolicy.CANCEL;
+                  }
+                  return NavigationActionPolicy.ALLOW;
+                },
+                // Block popup windows entirely to prevent spam ads
+                onCreateWindow: (controller, action) async {
+                  return false;
+                },
+              ),
             ),
-          ),
-          Expanded(
-            child: InAppWebView(
-              initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-              initialSettings: CfSession.webViewSettings(popups: true),
-              onWebViewCreated: (c) => _web = c,
-              onProgressChanged: (_, p) {
-                if (mounted) setState(() => _progress = p / 100);
-              },
-              onLoadStop: (_, __) => _checkIfSolved(),
-              // Turnstile / some sites open helper windows; keep them in-app.
-              onCreateWindow: (controller, action) async {
-                final u = action.request.url;
-                if (u != null) {
-                  await controller.loadUrl(urlRequest: URLRequest(url: u));
-                }
-                return false;
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
