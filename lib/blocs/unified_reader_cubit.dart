@@ -135,11 +135,20 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
     this.startPageKey,
   }) : super(
           UnifiedReaderState(
-            vertical: series.vertical ?? false,
+            vertical: series.vertical ?? _isWebtoonByDefault(series),
             rtl: series.rtl ?? false,
             dim: series.dim,
           ),
         );
+
+  static bool _isWebtoonByDefault(Series s) {
+    final t = (s.url + s.title + (s.chapterUrl ?? '')).toLowerCase();
+    return t.contains('webtoon') ||
+        t.contains('toongod') ||
+        t.contains('manhua') ||
+        t.contains('manhwa') ||
+        t.contains('bilibili');
+  }
 
   final ChapterSource source;
   final Series series;

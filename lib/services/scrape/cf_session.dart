@@ -74,8 +74,10 @@ class CfSession {
       if (host.isEmpty) return;
       final cookies = await CookieManager.instance().getCookies(url: WebUri(url));
       if (cookies.isEmpty) return;
-      _cookieByHost[host] =
-          cookies.map((c) => '${c.name}=${c.value}').join('; ');
+      final str = cookies.map((c) => '${c.name}=${c.value}').join('; ');
+      _cookieByHost[host] = str;
+      final cleanHost = host.replaceFirst(RegExp(r'^www\.'), '');
+      _cookieByHost[cleanHost] = str;
     } catch (_) {}
   }
 
@@ -110,12 +112,33 @@ class CfSession {
     return null;
   }
 
+  static String? _findCookie(String host) {
+    if (host.isEmpty) return null;
+    if (_cookieByHost.containsKey(host) && _cookieByHost[host]!.isNotEmpty) {
+      return _cookieByHost[host];
+    }
+    final cleanHost = host.replaceFirst(RegExp(r'^www\.'), '');
+    for (final entry in _cookieByHost.entries) {
+      if (entry.value.isEmpty) continue;
+      final entryClean = entry.key.replaceFirst(RegExp(r'^www\.'), '');
+      if (entryClean == cleanHost ||
+          cleanHost.endsWith('.$entryClean') ||
+          entryClean.endsWith('.$cleanHost')) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
   /// Headers for downloading a page image (used by CachedNetworkImage).
   static Map<String, String> imageHeaders(String imageUrl, String? referer) {
     final host = Uri.tryParse(imageUrl)?.host ?? '';
-    final cookie = _cookieByHost[host];
+    final refHost = referer != null ? (Uri.tryParse(referer)?.host ?? '') : '';
+    final cookie = _findCookie(host) ?? (refHost.isNotEmpty ? _findCookie(refHost) : null);
     return {
       'User-Agent': userAgent,
+      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
       if (referer != null) 'Referer': referer,
       if (cookie != null && cookie.isNotEmpty) 'Cookie': cookie,
     };

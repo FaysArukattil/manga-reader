@@ -837,6 +837,7 @@ class _StreamPager extends StatefulWidget {
 }
 
 class _StreamPagerState extends State<_StreamPager> {
+  final ScrollController _verticalScrollController = ScrollController();
   int get _count =>
       widget.pages.length +
       ((widget.isAllCaughtUp || widget.loadingNextChapter) ? 1 : 0);
@@ -847,9 +848,15 @@ class _StreamPagerState extends State<_StreamPager> {
     super.initState();
     _lastSoundPage = widget.initialPage;
     widget.controller.addListener(_syncFromPageController);
+    _verticalScrollController.addListener(_onVerticalScroll);
     ReaderAudio.instance.init();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _prefetch(widget.initialPage);
+      if (mounted) {
+        _prefetch(widget.initialPage);
+        if (widget.vertical && widget.initialPage > 0 && widget.pages.isNotEmpty) {
+          _scrollToIndex(widget.initialPage);
+        }
+      }
     });
   }
 
@@ -876,13 +883,42 @@ class _StreamPagerState extends State<_StreamPager> {
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromPageController);
+    _verticalScrollController.removeListener(_onVerticalScroll);
+    _verticalScrollController.dispose();
     super.dispose();
+  }
+
+  void _onVerticalScroll() {
+    if (!_verticalScrollController.hasClients || widget.pages.isEmpty) return;
+    final pos = _verticalScrollController.position;
+    final max = pos.maxScrollExtent;
+    if (max > 0) {
+      final frac = (pos.pixels / max).clamp(0.0, 1.0);
+      final page = (frac * (widget.pages.length - 1)).round();
+      if (page != _lastSoundPage) {
+        _lastSoundPage = page;
+        widget.onPageChanged(page);
+      }
+    }
+    if (pos.pixels >= max - 300) {
+      widget.onPageChanged(widget.pages.length - 1);
+    }
+  }
+
+  void _scrollToIndex(int idx) {
+    if (_verticalScrollController.hasClients && widget.pages.isNotEmpty) {
+      final max = _verticalScrollController.position.maxScrollExtent;
+      final target = (idx / widget.pages.length) * max;
+      _verticalScrollController.jumpTo(target.clamp(0.0, max));
+    }
   }
 
   void _syncFromPageController() {
     if (widget.controller.hasClients && widget.controller.page != null) {
       final target = widget.controller.page!.round();
-      if (widget.turnController.currentPage != target) {
+      if (widget.vertical) {
+        _scrollToIndex(target);
+      } else if (widget.turnController.currentPage != target) {
         widget.turnController.jumpToPage(target);
       }
     }
@@ -921,24 +957,23 @@ class _StreamPagerState extends State<_StreamPager> {
   void _go(int delta) {
     if (_isAnimatingPage) return;
     if (widget.vertical) {
-      final cur = widget.controller.hasClients
-          ? (widget.controller.page?.round() ?? widget.initialPage)
-          : widget.initialPage;
-      final target = cur + delta;
-      if (target < 0 || target >= _count) return;
-      _isAnimatingPage = true;
-      try {
-        HapticFeedback.lightImpact();
-      } catch (_) {}
-      widget.controller
-          .animateToPage(
-        target,
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-      )
-          .then((_) {
-        _isAnimatingPage = false;
-      });
+      if (_verticalScrollController.hasClients) {
+        final pos = _verticalScrollController.position;
+        final target = (_verticalScrollController.offset +
+                delta * (pos.viewportDimension * 0.75))
+            .clamp(0.0, pos.maxScrollExtent);
+        _isAnimatingPage = true;
+        try {
+          HapticFeedback.lightImpact();
+        } catch (_) {}
+        _verticalScrollController
+            .animateTo(
+              target,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOutCubic,
+            )
+            .then((_) => _isAnimatingPage = false);
+      }
     } else {
       if (delta > 0) {
         widget.turnController.nextPage();
@@ -1029,27 +1064,70 @@ class _StreamPagerState extends State<_StreamPager> {
           final size = context.size;
           if (size == null) return;
           final frac = d.localPosition.dy / size.height;
-          if (frac < 0.28) {
+          if (frac < 0.22) {
             _go(-1);
-          } else if (frac > 0.72) {
+          } else if (frac > 0.78) {
             _go(1);
           } else {
             widget.onCenterTap();
           }
         },
-        child: PageView.builder(
-          controller: widget.controller,
-          scrollDirection: Axis.vertical,
+        child: ListView.builder(
+          controller: _verticalScrollController,
+          padding: EdgeInsets.zero,
+          physics: const BouncingScrollPhysics(),
           itemCount: _count,
-          onPageChanged: _onPageTurned,
           itemBuilder: (context, i) {
-            return _AnimatedPage(
-              controller: widget.controller,
-              index: i,
-              vertical: true,
-              rtl: false,
-              pageFlipEffect: false,
-              child: _buildPageItem(context, i),
+            if (i == widget.pages.length) {
+              if (widget.loadingNextChapter) {
+                return _NextChapterLoadingCard(
+                  series: widget.series,
+                  vertical: true,
+                );
+              }
+              return widget.caughtUp;
+            }
+
+            final item = widget.pages[i];
+            final bool isFirstInChapter =
+                i > 0 && widget.pages[i - 1].chapterId != item.chapterId;
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (isFirstInChapter && item.chapterLabel.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 20),
+                    alignment: Alignment.center,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        item.chapterLabel,
+                        style: const TextStyle(
+                          color: Color(0xFF00FFA3),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                _ContinuousWebtoonSlice(
+                  key: ValueKey(item.url),
+                  item: item,
+                ),
+              ],
             );
           },
         ),
@@ -1080,100 +1158,6 @@ class _StreamPagerState extends State<_StreamPager> {
       },
       onCenterTap: widget.onCenterTap,
       itemBuilder: _buildPageItem,
-    );
-  }
-}
-
-// ------------------------------------------------------------- 3D page flip
-
-class _AnimatedPage extends StatelessWidget {
-  const _AnimatedPage({
-    required this.controller,
-    required this.index,
-    required this.vertical,
-    required this.rtl,
-    required this.pageFlipEffect,
-    required this.child,
-  });
-
-  final PageController controller;
-  final int index;
-  final bool vertical;
-  final bool rtl;
-  final bool pageFlipEffect;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      child: child,
-      builder: (context, child) {
-        double v;
-        if (controller.hasClients && controller.position.haveDimensions) {
-          v = (controller.page ?? controller.initialPage.toDouble()) - index;
-        } else {
-          v = controller.initialPage.toDouble() - index;
-        }
-        v = v.clamp(-1.0, 1.0).toDouble();
-        if (v == 0) return child!;
-
-        if (vertical) {
-          return Opacity(
-            opacity: 1 - v.abs() * 0.35,
-            child: child,
-          );
-        }
-
-        if (!pageFlipEffect) {
-          return Opacity(
-            opacity: 1 - v.abs() * 0.25,
-            child: child,
-          );
-        }
-
-        final sign = rtl ? -1.0 : 1.0;
-        final progress = v.abs();
-        final turningForward = (v * sign) > 0;
-
-        // Realistic 3D physical page curl rotation
-        final angle = -v * sign * 1.35;
-        final matrix = Matrix4.identity()
-          ..setEntry(3, 2, 0.0014)
-          ..rotateY(angle);
-
-        return Opacity(
-          opacity: (1 - progress * 0.2).clamp(0.0, 1.0),
-          child: Transform(
-            transform: matrix,
-            alignment:
-                turningForward ? Alignment.centerLeft : Alignment.centerRight,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                child!,
-                // Dynamic page fold and spine shadow overlay as the page turns
-                IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.38 * progress),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.28 * progress),
-                        ],
-                        stops: const [0.0, 0.2, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -1597,6 +1581,119 @@ class _PageSliceImageState extends State<_PageSliceImage> {
         }
         return Container(
           width: widget.width,
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          color: Colors.black,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.broken_image_rounded,
+                  color: Colors.white30, size: 28),
+              const SizedBox(height: 6),
+              const Text(
+                "Image slice failed to load",
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  await PageCache.instance.removeFile(pageKey);
+                  if (mounted) setState(() => _retryNonce++);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                ),
+                child: const Text('Retry', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ContinuousWebtoonSlice extends StatefulWidget {
+  const _ContinuousWebtoonSlice({
+    super.key,
+    required this.item,
+  });
+
+  final ReaderPageItem item;
+
+  @override
+  State<_ContinuousWebtoonSlice> createState() =>
+      _ContinuousWebtoonSliceState();
+}
+
+class _ContinuousWebtoonSliceState extends State<_ContinuousWebtoonSlice> {
+  int _retryNonce = 0;
+  int _autoRetries = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pageKey = PageCache.keyFor(widget.item.url);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
+    return CachedNetworkImage(
+      key: ValueKey('$pageKey#$_retryNonce'),
+      imageUrl: widget.item.url,
+      cacheKey: pageKey,
+      cacheManager: PageCache.instance,
+      httpHeaders:
+          CfSession.imageHeaders(widget.item.url, widget.item.referer),
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: Duration.zero,
+      width: screenWidth,
+      fit: BoxFit.fitWidth,
+      imageBuilder: (context, imageProvider) {
+        return Image(
+          image: imageProvider,
+          width: screenWidth,
+          fit: BoxFit.fitWidth,
+          filterQuality: FilterQuality.medium,
+        );
+      },
+      placeholder: (_, __) => Container(
+        width: screenWidth,
+        height: 260,
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: const SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white24,
+          ),
+        ),
+      ),
+      errorWidget: (_, url, error) {
+        CfDiag.log('image slice failed ${Uri.tryParse(url)?.host}: $error');
+        if (_autoRetries < 1) {
+          _autoRetries++;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await PageCache.instance.removeFile(pageKey);
+            if (mounted) setState(() => _retryNonce++);
+          });
+          return Container(
+            width: screenWidth,
+            height: 180,
+            alignment: Alignment.center,
+            child: const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white24,
+              ),
+            ),
+          );
+        }
+        return Container(
+          width: screenWidth,
           padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
           color: Colors.black,
           child: Column(

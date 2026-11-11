@@ -66,10 +66,11 @@ class CfWebFetcher {
         url,
         credentials: 'omit',
         crossOrigin: true,
-      );
+      ).timeout(const Duration(seconds: 6), onTimeout: () => null);
       if (viaReferer != null) return viaReferer;
     }
-    return _fetchVia(imgOrigin, url, credentials: 'include');
+    return _fetchVia(imgOrigin, url, credentials: 'include')
+        .timeout(const Duration(seconds: 6), onTimeout: () => null);
   }
 
   Future<WebFetchResult?> _fetchVia(
@@ -162,7 +163,7 @@ try {
 
     try {
       await headless.run();
-      await loaded.future.timeout(const Duration(seconds: 20));
+      await loaded.future.timeout(const Duration(seconds: 6));
     } catch (e) {
       CfDiag.log('webfetch session failed for $origin: $e');
       await headless.dispose();
@@ -175,10 +176,10 @@ try {
     }
 
     // If robots.txt itself sat behind an interstitial, give it time to clear.
-    for (var i = 0; i < 12; i++) {
+    for (var i = 0; i < 4; i++) {
       final ch = await c.evaluateJavascript(source: CfSession.challengeProbeJs);
       if (ch != true) break;
-      await Future<void>.delayed(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 600));
     }
     CfDiag.log('webfetch session ready for $origin');
     return _Session(headless, c, () => _sessions.remove(origin));
@@ -261,7 +262,7 @@ class CfFileService extends FileService {
     if (!canFallback ||
         !(_webHosts.contains(host) || _webRefHosts.contains(refHost))) {
       try {
-        first = await _http.get(url, headers: headers);
+        first = await _http.get(url, headers: headers).timeout(const Duration(seconds: 10));
         final code = first.statusCode;
         if (code < 400 || !canFallback) return first;
         if (code != 403 && code != 401 && code != 429 && code != 503) {
@@ -274,7 +275,9 @@ class CfFileService extends FileService {
       }
     }
 
-    final viaWeb = await CfWebFetcher.instance.fetch(url, referer: referer);
+    final viaWeb = await CfWebFetcher.instance
+        .fetch(url, referer: referer)
+        .timeout(const Duration(seconds: 7), onTimeout: () => null);
     if (viaWeb != null) {
       _webHosts.add(host);
       if (refHost.isNotEmpty) _webRefHosts.add(refHost);
