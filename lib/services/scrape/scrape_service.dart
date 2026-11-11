@@ -168,21 +168,25 @@ class ScrapeService {
           } else if (result.pages.length >= 2) {
             return result; // Fast path succeeded! Return immediately.
           } else {
-            // Series overview page? Auto-hop to the first available chapter.
-            final targetUrl = result.firstChapterUrl ??
-                (result.availableChapters.isNotEmpty
-                    ? _pickStartingChapter(result.availableChapters, url)?.url
-                    : null);
+            // Series overview page? Auto-hop to the first available chapter
+            // ONLY if the incoming URL is not already a chapter URL!
+            final isAlreadyChapter = UrlTools.chapterLabel(url) != null;
+            if (!isAlreadyChapter) {
+              final targetUrl = result.firstChapterUrl ??
+                  (result.availableChapters.isNotEmpty
+                      ? _pickStartingChapter(result.availableChapters, url)?.url
+                      : null);
 
-            if (targetUrl != null && targetUrl != url) {
-              final chRes = await scrapeChapter(targetUrl);
-              if (chRes.pages.length >= 2 || chRes.needsVerification) {
-                return chRes.copyWith(
-                  availableChapters: result.availableChapters.isNotEmpty
-                      ? result.availableChapters
-                      : chRes.availableChapters,
-                  coverUrl: result.coverUrl ?? chRes.coverUrl,
-                );
+              if (targetUrl != null && targetUrl != url) {
+                final chRes = await scrapeChapter(targetUrl);
+                if (chRes.pages.length >= 2 || chRes.needsVerification) {
+                  return chRes.copyWith(
+                    availableChapters: result.availableChapters.isNotEmpty
+                        ? result.availableChapters
+                        : chRes.availableChapters,
+                    coverUrl: result.coverUrl ?? chRes.coverUrl,
+                  );
+                }
               }
             }
           }
@@ -209,20 +213,23 @@ class ScrapeService {
       if (rendered.pages.length >= 2) {
         return rendered;
       }
-      final targetUrl = rendered.firstChapterUrl ??
-          (rendered.availableChapters.isNotEmpty
-              ? _pickStartingChapter(rendered.availableChapters, url)?.url
-              : null);
+      final isAlreadyChapter = UrlTools.chapterLabel(url) != null;
+      if (!isAlreadyChapter) {
+        final targetUrl = rendered.firstChapterUrl ??
+            (rendered.availableChapters.isNotEmpty
+                ? _pickStartingChapter(rendered.availableChapters, url)?.url
+                : null);
 
-      if (targetUrl != null && targetUrl != url) {
-        final chRes = await scrapeChapter(targetUrl);
-        if (chRes.pages.length >= 2 || chRes.needsVerification) {
-          return chRes.copyWith(
-            availableChapters: rendered.availableChapters.isNotEmpty
-                ? rendered.availableChapters
-                : chRes.availableChapters,
-            coverUrl: rendered.coverUrl ?? chRes.coverUrl,
-          );
+        if (targetUrl != null && targetUrl != url) {
+          final chRes = await scrapeChapter(targetUrl);
+          if (chRes.pages.length >= 2 || chRes.needsVerification) {
+            return chRes.copyWith(
+              availableChapters: rendered.availableChapters.isNotEmpty
+                  ? rendered.availableChapters
+                  : chRes.availableChapters,
+              coverUrl: rendered.coverUrl ?? chRes.coverUrl,
+            );
+          }
         }
       }
     } catch (e) {
@@ -267,6 +274,8 @@ class ScrapeService {
     var challengeSeen = false;
     Timer? quietTimer;
 
+    var currentPages = <String>[];
+
     void finish(ScrapedChapterResult r) {
       if (!completer.isCompleted) completer.complete(r);
       quietTimer?.cancel();
@@ -279,12 +288,68 @@ class ScrapeService {
       contentBlockers: null,
     );
 
-    /// Reads the current list of page image URLs from the live DOM.
+    /// Reads the current list of page image URLs from the live DOM / React state.
     Future<List<String>> readUrls(InAppWebViewController c) async {
       try {
         final apiRes = await c.callAsyncJavaScript(
           functionBody: r'''
             try {
+              // 1. Direct query of React Query Cache / Fiber for SPA readers (comix.to etc.)
+              var els = [
+                document.querySelector('.rpage-main'),
+                document.querySelector('.rpage'),
+                document.querySelector('#app-root'),
+                document.querySelector('.rpage-page')
+              ].filter(Boolean);
+
+              for (var ei = 0; ei < els.length; ei++) {
+                var el = els[ei];
+                for (var k in el) {
+                  if (k.startsWith('__reactFiber') || k.startsWith('__reactContainer')) {
+                    var fiber = el[k];
+                    if (fiber && fiber.current) fiber = fiber.current;
+                    var root = fiber;
+                    while (root && root.return) root = root.return;
+                    var stack = [root];
+                    var count = 0;
+                    while (stack.length > 0 && count < 2500) {
+                      count++;
+                      var f = stack.pop();
+                      if (!f) continue;
+                      var hook = f.memoizedState;
+                      while (hook) {
+                        var state = hook.memoizedState;
+                        if (state) {
+                          var cand = state.data || state;
+                          if (cand && Array.isArray(cand.iT) && cand.iT.length >= 2) {
+                            return cand.iT.map(function(item) {
+                              return (item && (item.H$ || item.url || item.src)) || '';
+                            }).filter(function(u) { return typeof u === 'string' && u.startsWith('http'); });
+                          }
+                        }
+                        hook = hook.next;
+                      }
+                      if (f.memoizedProps) {
+                        if (f.memoizedProps.client && typeof f.memoizedProps.client.getQueryCache === 'function') {
+                          var queries = f.memoizedProps.client.getQueryCache().getAll();
+                          for (var qi = 0; qi < queries.length; qi++) {
+                            var qd = queries[qi].state && queries[qi].state.data;
+                            if (qd && Array.isArray(qd.iT) && qd.iT.length >= 2) {
+                              return qd.iT.map(function(item) {
+                                return (item && (item.H$ || item.url || item.src)) || '';
+                              }).filter(function(u) { return typeof u === 'string' && u.startsWith('http'); });
+                            }
+                          }
+                        }
+                      }
+                      if (f.child) stack.push(f.child);
+                      if (f.sibling) stack.push(f.sibling);
+                    }
+                  }
+                }
+              }
+
+              // 2. Initial data fallback
               var init = document.getElementById('initial-data');
               if (init && init.textContent) {
                 var d = JSON.parse(init.textContent);
@@ -370,6 +435,7 @@ class ScrapeService {
 
           // Fast check: if expected pages are known and already rendered, exit immediately
           pages = await readUrls(c);
+          if (pages.length >= 2) currentPages = pages;
           if (expected == 0) {
             final e = await c.evaluateJavascript(
               source: WebScraper.expectedPagesJs,
@@ -377,6 +443,7 @@ class ScrapeService {
             if (e is num) expected = e.toInt();
           }
           if (expected > 0 && pages.length >= expected) break;
+          if (pages.length >= 10 && (expected == 0 || pages.length >= expected)) break;
 
           await c.evaluateJavascript(source: WebScraper.stripAdsJs);
           final atBottom =
@@ -384,13 +451,15 @@ class ScrapeService {
           await Future<void>.delayed(const Duration(milliseconds: 220));
 
           pages = await readUrls(c);
+          if (pages.length >= 2) currentPages = pages;
           if (expected == 0) {
             final e = await c.evaluateJavascript(
               source: WebScraper.expectedPagesJs,
             );
             if (e is num) expected = e.toInt();
           }
-          if (atBottom == true) bottom = true;
+          if (expected > 0 && pages.length >= expected) break;
+          if (atBottom == true && pages.isNotEmpty) bottom = true;
 
           if (pages.length == lastCount) {
             stable++;
@@ -403,7 +472,8 @@ class ScrapeService {
           if (pages.length >= 2 &&
               (complete ||
                   (bottom && stable >= 2 && (expected == 0 || pages.length >= expected)) ||
-                  (pages.length >= 10 && stable >= 3 && expected == 0))) {
+                  (pages.length >= 10 && stable >= 3 && expected == 0) ||
+                  (bottom && stable >= 6))) {
             break;
           }
         } catch (_) {
@@ -571,9 +641,17 @@ class ScrapeService {
 
     quietTimer = Timer(const Duration(seconds: 18), () {
       if (!completer.isCompleted) {
-        finish(challengeSeen
-            ? _needsVerification(url)
-            : ScrapedChapterResult(chapterUrl: url, pages: const []));
+        if (currentPages.length >= 2) {
+          finish(ScrapedChapterResult(
+            chapterUrl: url,
+            pages: currentPages,
+            chapterLabel: UrlTools.chapterLabel(url),
+          ));
+        } else {
+          finish(challengeSeen
+              ? _needsVerification(url)
+              : ScrapedChapterResult(chapterUrl: url, pages: const []));
+        }
       }
     });
 
@@ -583,7 +661,13 @@ class ScrapeService {
         CfDiag.log('headless timeout challengeSeen=$challengeSeen $url');
         final r = challengeSeen
             ? _needsVerification(url)
-            : ScrapedChapterResult(chapterUrl: url, pages: const []);
+            : (currentPages.length >= 2
+                ? ScrapedChapterResult(
+                    chapterUrl: url,
+                    pages: currentPages,
+                    chapterLabel: UrlTools.chapterLabel(url),
+                  )
+                : ScrapedChapterResult(chapterUrl: url, pages: const []));
         finish(r);
         return r;
       },

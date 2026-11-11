@@ -144,69 +144,58 @@ class WebScraper {
 
     // 0b. SPA / React Fiber QueryCache extraction (comix.to, Next.js / TanStack readers)
     try {
-      var rootEl = document.querySelector('#app-root, .rpage-body, .rpage, main[class*="rpage"], body');
-      if (rootEl) {
-        var fKey = Object.keys(rootEl).find(function(k) {
-          return k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$');
-        });
-        if (!fKey) {
-          var rEl = document.querySelector('.rpage, [class*="rpage"], #app-root > *');
-          if (rEl) {
-            fKey = Object.keys(rEl).find(function(k) {
-              return k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$');
-            });
-            if (fKey) rootEl = rEl;
-          }
-        }
-        if (fKey) {
-          var curr = rootEl[fKey];
-          var q = [curr];
-          var seenNodes = new Set();
-          while (q.length > 0 && q.length < 350) {
-            var n = q.shift();
-            if (!n || seenNodes.has(n)) continue;
-            seenNodes.add(n);
+      var els = [
+        document.querySelector('.rpage-main'),
+        document.querySelector('.rpage'),
+        document.querySelector('#app-root'),
+        document.querySelector('.rpage-page')
+      ].filter(Boolean);
 
-            if (n.memoizedProps && n.memoizedProps.client && typeof n.memoizedProps.client.getQueryCache === 'function') {
-              var allQ = n.memoizedProps.client.getQueryCache().getAll();
-              for (var qi = 0; qi < allQ.length; qi++) {
-                var qState = allQ[qi].state && allQ[qi].state.data;
-                if (qState) {
-                  var list = qState.iT || qState.images || qState.pages;
-                  if (Array.isArray(list) && list.length >= 2) {
-                    var urls = list.map(function(item) {
-                      return (item && (item.H$ || item.url || item.src || (typeof item === 'string' ? item : null))) || '';
-                    }).filter(function(u) { return u && u.indexOf('http') === 0; });
-                    if (urls.length >= 2) return urls;
+      for (var ei = 0; ei < els.length; ei++) {
+        var el = els[ei];
+        for (var k in el) {
+          if (k.startsWith('__reactFiber') || k.startsWith('__reactContainer')) {
+            var fiber = el[k];
+            if (fiber && fiber.current) fiber = fiber.current;
+            var root = fiber;
+            while (root && root.return) root = root.return;
+            var stack = [root];
+            var count = 0;
+            while (stack.length > 0 && count < 2500) {
+              count++;
+              var f = stack.pop();
+              if (!f) continue;
+              var hook = f.memoizedState;
+              while (hook) {
+                var state = hook.memoizedState;
+                if (state) {
+                  var cand = state.data || state;
+                  if (cand && Array.isArray(cand.iT) && cand.iT.length >= 2) {
+                    var outUrls = cand.iT.map(function(item) {
+                      return (item && (item.H$ || item.url || item.src)) || '';
+                    }).filter(function(u) { return typeof u === 'string' && u.startsWith('http'); });
+                    if (outUrls.length >= 2) return outUrls;
                   }
                 }
+                hook = hook.next;
               }
-            }
-
-            var hook = n.memoizedState;
-            while (hook) {
-              if (hook.memoizedState && typeof hook.memoizedState === 'object') {
-                var hs = hook.memoizedState;
-                var candList = [hs, hs.data, hs.chapter];
-                for (var ci = 0; ci < candList.length; ci++) {
-                  var cand = candList[ci];
-                  if (cand) {
-                    var l = cand.iT || cand.images || cand.pages;
-                    if (Array.isArray(l) && l.length >= 2) {
-                      var urls2 = l.map(function(item) {
-                        return (item && (item.H$ || item.url || item.src || (typeof item === 'string' ? item : null))) || '';
-                      }).filter(function(u) { return u && u.indexOf('http') === 0; });
-                      if (urls2.length >= 2) return urls2;
+              if (f.memoizedProps) {
+                if (f.memoizedProps.client && typeof f.memoizedProps.client.getQueryCache === 'function') {
+                  var queries = f.memoizedProps.client.getQueryCache().getAll();
+                  for (var qi = 0; qi < queries.length; qi++) {
+                    var qd = queries[qi].state && queries[qi].state.data;
+                    if (qd && Array.isArray(qd.iT) && qd.iT.length >= 2) {
+                      var outUrls2 = qd.iT.map(function(item) {
+                        return (item && (item.H$ || item.url || item.src)) || '';
+                      }).filter(function(u) { return typeof u === 'string' && u.startsWith('http'); });
+                      if (outUrls2.length >= 2) return outUrls2;
                     }
                   }
                 }
               }
-              hook = hook.next;
+              if (f.child) stack.push(f.child);
+              if (f.sibling) stack.push(f.sibling);
             }
-
-            if (n.child) q.push(n.child);
-            if (n.sibling) q.push(n.sibling);
-            if (n.return && q.length < 50) q.push(n.return);
           }
         }
       }

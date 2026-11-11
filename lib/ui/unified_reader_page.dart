@@ -1185,25 +1185,39 @@ class _PageImage extends StatefulWidget {
 
 class _PageImageState extends State<_PageImage> {
   final ScrollController _scrollController = ScrollController();
+  final TransformationController _transformController =
+      TransformationController();
   int _retryNonce = 0;
   int _autoRetries = 0;
   double _dragStartY = 0;
   DateTime _dragStartTime = DateTime.now();
+  bool _isZoomed = false;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _transformController.addListener(_onTransform);
   }
 
   void _onScroll() {
     if (mounted) setState(() {});
   }
 
+  void _onTransform() {
+    final scale = _transformController.value.getMaxScaleOnAxis();
+    final zoomed = scale > 1.05;
+    if (zoomed != _isZoomed) {
+      if (mounted) setState(() => _isZoomed = zoomed);
+    }
+  }
+
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
+    _transformController.removeListener(_onTransform);
     _scrollController.dispose();
+    _transformController.dispose();
     super.dispose();
   }
 
@@ -1255,6 +1269,9 @@ class _PageImageState extends State<_PageImage> {
                     }
                   },
                   child: InteractiveViewer(
+                    transformationController: _transformController,
+                    panEnabled: _isZoomed,
+                    scaleEnabled: true,
                     minScale: 1.0,
                     maxScale: 3.5,
                     child: SingleChildScrollView(
