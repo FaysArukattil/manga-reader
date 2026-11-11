@@ -24,11 +24,14 @@ class CfSession {
   static Future<void> init() async {
     try {
       final ua = await InAppWebViewController.getDefaultUserAgent();
-      // Android WebView adds "; wv" which Cloudflare/Turnstile treat as an
-      // embedded-browser signal. We strip it and then send THIS exact string
-      // from every WebView, the HTTP client and image downloads (cf_clearance
-      // is bound to the UA that solved the challenge).
-      if (ua.trim().isNotEmpty) _userAgent = ua.replaceAll('; wv)', ')');
+      // Android WebView adds "; wv" and "Version/X.X" which Cloudflare/Turnstile
+      // treat as an embedded-browser signal. We strip both so Cloudflare sees
+      // standard Chrome/Safari signatures.
+      if (ua.trim().isNotEmpty) {
+        _userAgent = ua
+            .replaceAll(RegExp(r';\s*wv\b'), '')
+            .replaceAll(RegExp(r'Version\/\d+\.\d+\s*'), '');
+      }
     } catch (_) {}
   }
 
@@ -132,11 +135,12 @@ class CfSession {
   static const String challengeProbeJs = r'''
 (function(){
   try {
+    if (typeof window._cf_chl_opt !== 'undefined') return true;
     var t = (document.title || '').toLowerCase();
     if (t.indexOf('just a moment') !== -1 ||
         t.indexOf('attention required! | cloudflare') !== -1 ||
         t.indexOf('verify you are human') !== -1) return true;
-    if (document.querySelector('#challenge-running, #challenge-stage, #challenge-form, #challenge-error-text, #cf-challenge-running, #cf-please-wait, .cf-browser-verification, #cf-wrapper .cf-error-details')) return true;
+    if (document.querySelector('#challenge-running, #challenge-stage, #challenge-form, #challenge-error-text, #cf-challenge-running, #cf-please-wait, .cf-browser-verification, #cf-wrapper .cf-error-details, iframe[src*="cloudflare.com"], iframe[src*="challenge-platform"]')) return true;
     var b = document.body ? (document.body.innerText || '') : '';
     if (b.length < 1500 && /verify you are human|checking (if the site connection is secure|your browser)|enable javascript and cookies to continue/i.test(b)) return true;
     return false;

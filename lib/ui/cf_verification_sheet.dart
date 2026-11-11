@@ -6,7 +6,6 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/scrape/cf_session.dart';
 import '../services/scrape/site_adapter.dart';
 import '../services/web_scraper.dart';
-import 'ad_block.dart';
 
 /// What the sheet read from the page once it was unlocked. The caller stores
 /// it in the scrape cache so this chapter is never verified again.
@@ -91,11 +90,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
 
   Future<void> _finish() async {
     if (_done) return;
-    _done = true;
-    _poll?.cancel();
 
-    // Lazy / SPA readers render pages as you scroll: step down the page and
-    // keep reading until the list stops growing.
     // Read pages with quick scrolling so lazy-loading images populate fast
     var pages = await _readPages();
     var last = pages.length;
@@ -121,6 +116,30 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
       }
       if (pages.length < 2 && bottom && stable >= 4 && i >= 6) break;
     }
+
+    final currentUrl = await _web?.getUrl() ?? WebUri(widget.url);
+    final cookies = await CookieManager.instance().getCookies(url: currentUrl);
+    final hasClearance = cookies.any((c) =>
+        c.name == 'cf_clearance' &&
+        (c.value?.toString().trim().isNotEmpty ?? false));
+
+    if (pages.length < 2 && !hasClearance) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please complete the verification check on screen first.',
+            ),
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    _done = true;
+    _poll?.cancel();
 
     String? next, prev, title;
     final chapters = <ChapterRef>[];
@@ -168,19 +187,29 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
     }
   }
 
-  /// Solved = the page in front of us is a normal page (no challenge markers),
-  /// fully loaded, for two consecutive polls.
+  /// Solved = either cf_clearance cookie has been acquired, OR the chapter
+  /// pages are rendered in the DOM.
   Future<void> _checkIfSolved() async {
     if (_done || _checking || _web == null) return;
     _checking = true;
     try {
+      // 1. Check if cf_clearance cookie was issued (authoritative signal of bypass)
+      final currentUrl = await _web!.getUrl() ?? WebUri(widget.url);
+      final cookies =
+          await CookieManager.instance().getCookies(url: currentUrl);
+      final hasClearance = cookies.any((c) =>
+          c.name == 'cf_clearance' &&
+          (c.value?.toString().trim().isNotEmpty ?? false));
+
+      // 2. Check if currently on challenge page
       final challenge = await _web!.evaluateJavascript(
         source: CfSession.challengeProbeJs,
       );
-      final ready = await _web!.evaluateJavascript(
-        source: CfSession.pageReadyProbeJs,
-      );
-      if (challenge != true && ready == true) {
+
+      // 3. Check for reader pages
+      final currentPages = await _readPages();
+
+      if (hasClearance || (challenge != true && currentPages.length >= 2)) {
         _okStreak++;
       } else {
         _okStreak = 0;
@@ -208,7 +237,6 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
   @override
   Widget build(BuildContext context) {
     final host = Uri.tryParse(widget.url)?.host ?? widget.url;
-    final baseHost = Uri.tryParse(widget.url)?.host.toLowerCase() ?? '';
 
     return Container(
       color: const Color(0xFF0D0E11),
@@ -311,7 +339,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
               child: InAppWebView(
                 initialUrlRequest: URLRequest(url: WebUri(widget.url)),
                 initialSettings: CfSession.webViewSettings(
-                  contentBlockers: buildContentBlockers(),
+                  contentBlockers: null,
                   popups: false,
                 ),
                 onWebViewCreated: (c) => _web = c,
@@ -324,7 +352,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
                     await controller.evaluateJavascript(source: r'''
                       (function() {
                         try {
-                          var el = document.querySelector('#challenge-stage, .cf-turnstile, iframe[src*="challenges.cloudflare.com"], #cf-wrapper, #challenge-form');
+                          var el = document.querySelector('#challenge-stage, .cf-turnstile, iframe[src*="challenges.cloudflare.com"], #cf-wrapper, #challenge-form, .main-content, .main-wrapper');
                           if (el) {
                             el.scrollIntoView({behavior: 'smooth', block: 'center'});
                           }
@@ -337,19 +365,9 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
                 shouldOverrideUrlLoading: (controller, navigationAction) async {
                   final reqUrl = navigationAction.request.url;
                   if (reqUrl == null) return NavigationActionPolicy.ALLOW;
-                  final targetHost = reqUrl.host.toLowerCase();
-
-                  // Allow requests within the site domain, cloudflare challenge, or turnstile
-                  final isAllowed = targetHost.isEmpty ||
-                      targetHost == baseHost ||
-                      targetHost.endsWith('.$baseHost') ||
-                      targetHost.contains('cloudflare') ||
-                      targetHost.contains('turnstile') ||
-                      targetHost.contains('recaptcha') ||
-                      targetHost.contains('hcaptcha');
-
-                  if (!isAllowed) {
-                    // Block rogue ad redirects
+                  final scheme = reqUrl.scheme.toLowerCase();
+                  // Block rogue external app intents/schemes, allow all web challenge redirects
+                  if (scheme != 'http' && scheme != 'https' && scheme != 'about') {
                     return NavigationActionPolicy.CANCEL;
                   }
                   return NavigationActionPolicy.ALLOW;

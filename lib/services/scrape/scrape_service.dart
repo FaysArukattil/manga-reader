@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/url_tools.dart';
-import '../../ui/ad_block.dart';
 import '../web_scraper.dart';
 import 'cf_session.dart';
 import 'generic_site_adapter.dart';
@@ -287,7 +286,7 @@ class ScrapeService {
     }
 
     final settings = CfSession.webViewSettings(
-      contentBlockers: buildContentBlockers(),
+      contentBlockers: null,
     );
 
     /// Reads the current list of page image URLs from the live DOM.

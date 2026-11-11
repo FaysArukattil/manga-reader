@@ -101,6 +101,7 @@ class WebScraper {
                 img.getAttribute('data-lazy-src') ||
                 img.getAttribute('data-original') ||
                 img.getAttribute('data-cfsrc') ||
+                img.getAttribute('data-wpfc-original-src') ||
                 img.getAttribute('data-url') ||
                 img.getAttribute('data-cdn') ||
                 img.getAttribute('data-full-url') ||
@@ -112,7 +113,7 @@ class WebScraper {
                 img.getAttribute('src') ||
                 img.currentSrc;
       if (!src || src.indexOf('data:') === 0) {
-        var ss = img.getAttribute('data-srcset') || img.getAttribute('srcset');
+        var ss = img.getAttribute('data-srcset') || img.getAttribute('srcset') || img.getAttribute('data-lazy-srcset');
         var pic = img.parentElement && img.parentElement.tagName === 'PICTURE' ? img.parentElement : null;
         if (!ss && pic) {
           var so = pic.querySelector('source[srcset]');
@@ -175,11 +176,34 @@ class WebScraper {
       }
       return out;
     }
-    for (var i = 0; i < containerSelectors.length; i++) {
-      var c = document.querySelector(containerSelectors[i]);
-      if (c) {
-        var got = collect(c.querySelectorAll('img'));
-        if (got.length >= 2) { items = got; break; }
+    // 1. Direct page queries across known reader selectors
+    var pageSelectors = [
+      '.reading-content img',
+      '.wp-manga-chapter-img',
+      '.page-break img',
+      '#readerarea img',
+      '.container-chapter-reader img',
+      '#chapter-content img',
+      '#chapterimages img',
+      '.chapter-images img',
+      '.read-container img',
+      '.viewer-cnt img',
+      '#divImage img',
+      '.comic-page img',
+      '.entry-content img'
+    ];
+    for (var i = 0; i < pageSelectors.length; i++) {
+      var found = collect(document.querySelectorAll(pageSelectors[i]));
+      if (found.length >= 2) { items = found; break; }
+    }
+
+    if (items.length < 2) {
+      for (var i = 0; i < containerSelectors.length; i++) {
+        var c = document.querySelector(containerSelectors[i]);
+        if (c) {
+          var got = collect(c.querySelectorAll('img'));
+          if (got.length >= 2) { items = got; break; }
+        }
       }
     }
 
