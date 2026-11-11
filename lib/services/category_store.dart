@@ -5,14 +5,7 @@ class CategoryStore {
 
   static const String _key = 'shelfmark_custom_categories_v1';
   static const List<String> defaultCategories = [
-    'Reading',
-    'Plan to Read',
     'Favorites',
-    'Completed',
-    'Fantasy',
-    'Action',
-    'Webtoon',
-    'Thriller',
   ];
 
   static Future<List<String>> getCategories() async {

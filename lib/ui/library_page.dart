@@ -1,8 +1,9 @@
 import 'dart:ui' show ImageFilter;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../blocs/auth_bloc.dart';
@@ -124,9 +125,19 @@ class _LibraryPageState extends State<LibraryPage> {
         url: result.url,
         title: result.title,
         status: result.status,
-      ).copyWith(category: result.category ?? bloc.state.categoryFilter);
+      ).copyWith(
+        category: result.category ?? bloc.state.categoryFilter,
+        coverUrl: result.customCoverUrl,
+      );
+      if (result.customCoverBytes != null) {
+        await context
+            .read<ThumbnailStore>()
+            .save(series.id, result.customCoverBytes!);
+      }
       bloc.add(LibraryAddRequested(series));
-      if (result.openAfter) UnifiedReaderPage.openSeries(context, series);
+      if (mounted && result.openAfter) {
+        UnifiedReaderPage.openSeries(context, series);
+      }
     } else {
       final urlChanged =
           UrlTools.normalize(result.url) != UrlTools.normalize(existing.url);
@@ -139,9 +150,20 @@ class _LibraryPageState extends State<LibraryPage> {
         status: result.status,
         category: result.category ?? existing.category,
         scroll: urlChanged ? 0 : existing.scroll,
+        coverUrl: result.customCoverUrl ?? existing.coverUrl,
       );
+      if (result.customCoverBytes != null) {
+        await context
+            .read<ThumbnailStore>()
+            .save(existing.id, result.customCoverBytes!);
+      }
       bloc.add(
-        LibraryEditRequested(updated, refetchCover: newTitle != existing.title),
+        LibraryEditRequested(
+          updated,
+          refetchCover: result.customCoverBytes == null &&
+              result.customCoverUrl == null &&
+              newTitle != existing.title,
+        ),
       );
     }
   }
@@ -868,89 +890,172 @@ class _LibraryPageState extends State<LibraryPage> {
 
   void _showCategoryManagerSheet() {
     final bloc = context.read<LibraryBloc>();
+    final t = context.tokens;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: context.tokens.surface,
+      backgroundColor: t.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (sheetContext) {
-        final t = sheetContext.tokens;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return BlocBuilder<LibraryBloc, LibraryState>(
+          builder: (context, state) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Categories',
-                      style: TextStyle(
-                        color: t.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.pop(sheetContext);
-                        _showAddCategoryDialog();
-                      },
-                      icon: Icon(Icons.add, size: 16, color: t.accent),
-                      label: Text(
-                        'New',
-                        style: TextStyle(
-                          color: t.accent,
-                          fontWeight: FontWeight.w700,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Manage Categories',
+                              style: TextStyle(
+                                color: t.textPrimary,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Filter your shelf or edit categories',
+                              style: TextStyle(
+                                  color: t.textSecondary, fontSize: 13),
+                            ),
+                          ],
                         ),
-                      ),
+                        FilledButton.icon(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            _showAddCategoryDialog();
+                          },
+                          icon: const Icon(Icons.add_rounded, size: 16),
+                          label: const Text('New'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: t.accent,
+                            foregroundColor: const Color(0xFF04130C),
+                            textStyle:
+                                const TextStyle(fontWeight: FontWeight.w800),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 18),
+                    if (state.categories.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            'No custom categories yet. Tap "New" above to add one!',
+                            style: TextStyle(
+                                color: t.textTertiary, fontSize: 13.5),
+                          ),
+                        ),
+                      )
+                    else
+                      ...state.categories.map((cat) {
+                        final count = state.all
+                            .where((s) =>
+                                (s.category ?? s.status.label).toLowerCase() ==
+                                cat.toLowerCase())
+                            .length;
+                        final isFiltered = state.categoryFilter == cat;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: isFiltered
+                                  ? t.accent.withValues(alpha: 0.12)
+                                  : t.surfaceCard,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                  color: isFiltered ? t.accent : t.border),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.folder_rounded,
+                                  size: 20,
+                                  color: isFiltered ? t.accent : t.textSecondary,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        cat,
+                                        style: TextStyle(
+                                          color: isFiltered
+                                              ? t.accent
+                                              : t.textPrimary,
+                                          fontSize: 14.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        '$count ${count == 1 ? "manga" : "mangas"}',
+                                        style: TextStyle(
+                                            color: t.textSecondary,
+                                            fontSize: 11.5),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: Icon(Icons.edit_outlined,
+                                      size: 18, color: t.textSecondary),
+                                  tooltip: 'Rename',
+                                  onPressed: () {
+                                    Navigator.pop(sheetContext);
+                                    _showRenameCategoryDialog(cat);
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded,
+                                      size: 18, color: Colors.redAccent),
+                                  tooltip: 'Delete',
+                                  onPressed: () async {
+                                    Navigator.pop(sheetContext);
+                                    final ok = await _showConfirmDialog(
+                                      title: 'Delete "$cat"?',
+                                      content:
+                                          'Books in this category will not be deleted, they will simply lose this label.',
+                                      confirmLabel: 'Delete',
+                                      isDestructive: true,
+                                      icon: Icons.folder_delete_rounded,
+                                    );
+                                    if (ok == true && mounted) {
+                                      bloc.add(LibraryCategoryRemoved(cat));
+                                      _snack('Deleted category "$cat"');
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Tap to filter your shelf. Long-press a chip on the home '
-                  'screen to rename or delete it.',
-                  style: TextStyle(color: t.textSecondary, fontSize: 12.5),
-                ),
-                const SizedBox(height: 14),
-                BlocBuilder<LibraryBloc, LibraryState>(
-                  builder: (context, state) => Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _CategoryChip(
-                        label: 'All',
-                        selected: state.categoryFilter == null,
-                        onTap: () {
-                          Navigator.pop(sheetContext);
-                          bloc.add(const LibraryCategoryFilterChanged(null));
-                        },
-                      ),
-                      for (final cat in state.categories)
-                        _CategoryChip(
-                          label: cat,
-                          selected: state.categoryFilter == cat,
-                          onTap: () {
-                            Navigator.pop(sheetContext);
-                            bloc.add(LibraryCategoryFilterChanged(cat));
-                          },
-                          onLongPress: () {
-                            Navigator.pop(sheetContext);
-                            _showCategoryOptions(cat);
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -1044,74 +1149,147 @@ class _LibraryPageState extends State<LibraryPage> {
             ),
           ),
           const SizedBox(width: 8),
-          _buildAccountMenu(user?.photoURL, user?.email),
+          GestureDetector(
+            onTap: _showProfileSheet,
+            child: Container(
+              width: 42,
+              height: 42,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: t.accent, width: 1.5),
+              ),
+              child: CircleAvatar(
+                backgroundColor: t.surfaceCard,
+                backgroundImage: user?.photoURL != null
+                    ? NetworkImage(user!.photoURL!)
+                    : null,
+                child: user?.photoURL == null
+                    ? Icon(Icons.person, size: 20, color: t.textSecondary)
+                    : null,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildAccountMenu(String? photoUrl, String? email) {
+  void _showProfileSheet() {
     final t = context.tokens;
-    return PopupMenuButton<String>(
-      tooltip: 'Account',
-      offset: const Offset(0, 48),
-      color: t.surfaceCard,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: t.border),
+    final user = context.read<AuthBloc>().state.user;
+    final bloc = context.read<LibraryBloc>();
+    final all = bloc.state.all;
+    final readingCount =
+        all.where((s) => s.status == ReadStatus.reading).length;
+    final completedCount =
+        all.where((s) => s.status == ReadStatus.completed).length;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: EdgeInsets.zero,
-      onSelected: (v) {
-        if (v == 'out') {
-          context.read<AuthBloc>().add(const AuthSignOutRequested());
-        } else if (v == 'delete') {
-          _deleteAccount();
-        }
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem<String>(
-          enabled: false,
-          child: Text(
-            email ?? 'Signed in as Guest',
-            style: TextStyle(color: t.textSecondary, fontSize: 12),
-          ),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem<String>(
-          value: 'out',
-          child: Row(
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.logout_rounded, size: 18, color: t.textPrimary),
-              const SizedBox(width: 10),
-              Text('Sign out', style: TextStyle(color: t.textPrimary)),
+              Container(
+                width: 68,
+                height: 68,
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [t.accent, t.accent.withValues(alpha: 0.3)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: CircleAvatar(
+                  backgroundColor: t.surfaceCard,
+                  backgroundImage: user?.photoURL != null
+                      ? NetworkImage(user!.photoURL!)
+                      : null,
+                  child: user?.photoURL == null
+                      ? Icon(Icons.person, size: 34, color: t.textSecondary)
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                user?.displayName ?? 'Manga Reader',
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                user?.email ?? 'Guest Profile (Local Storage)',
+                style: TextStyle(color: t.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: _ProfileStatCard(
+                      label: 'Total Books',
+                      value: '${all.length}',
+                      icon: Icons.auto_stories_rounded,
+                      color: t.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _ProfileStatCard(
+                      label: 'Reading',
+                      value: '$readingCount',
+                      icon: Icons.menu_book_rounded,
+                      color: Colors.blueAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _ProfileStatCard(
+                      label: 'Completed',
+                      value: '$completedCount',
+                      icon: Icons.check_circle_outline_rounded,
+                      color: Colors.purpleAccent,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              _SheetActionTile(
+                icon: Icons.logout_rounded,
+                iconColor: t.textPrimary,
+                title: 'Sign Out',
+                subtitle: 'Switch accounts or read offline',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  context.read<AuthBloc>().add(const AuthSignOutRequested());
+                },
+              ),
+              const SizedBox(height: 8),
+              _SheetActionTile(
+                icon: Icons.delete_outline_rounded,
+                iconColor: Colors.redAccent,
+                title: 'Delete All Data',
+                subtitle: 'Permanently remove library and cloud sync',
+                destructive: true,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _deleteAccount();
+                },
+              ),
             ],
           ),
-        ),
-        const PopupMenuItem<String>(
-          value: 'delete',
-          child: Row(
-            children: [
-              Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-              SizedBox(width: 10),
-              Text('Delete data', style: TextStyle(color: Colors.redAccent)),
-            ],
-          ),
-        ),
-      ],
-      child: Container(
-        width: 42,
-        height: 42,
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: t.accent, width: 1.5),
-        ),
-        child: CircleAvatar(
-          backgroundColor: t.surfaceCard,
-          backgroundImage: photoUrl == null ? null : NetworkImage(photoUrl),
-          child: photoUrl == null
-              ? Icon(Icons.person, size: 18, color: t.textSecondary)
-              : null,
         ),
       ),
     );
@@ -1352,98 +1530,177 @@ class _LibraryPageState extends State<LibraryPage> {
                 bloc.add(const LibraryUpdatesRequested(force: true));
                 await Future<void>.delayed(const Duration(milliseconds: 700));
               },
-              child: CustomScrollView(
-                controller: _scroll,
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
-                ),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _buildHeader(state),
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onHorizontalDragEnd: (details) {
+                  final v = details.primaryVelocity ?? 0;
+                  if (v.abs() < 240) return;
+                  final filters = <String?>[null, ...state.categories];
+                  final currentIndex = filters.indexOf(state.categoryFilter);
+                  if (currentIndex == -1) return;
+                  if (v < 0 && currentIndex < filters.length - 1) {
+                    HapticFeedback.selectionClick();
+                    bloc.add(LibraryCategoryFilterChanged(filters[currentIndex + 1]));
+                  } else if (v > 0 && currentIndex > 0) {
+                    HapticFeedback.selectionClick();
+                    bloc.add(LibraryCategoryFilterChanged(filters[currentIndex - 1]));
+                  }
+                },
+                child: CustomScrollView(
+                  controller: _scroll,
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
                   ),
-                  if (showHighlights)
+                  slivers: [
                     SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
-                        child: _ContinueHero(
-                          series: _pickHero(state.all),
-                          onTap: _open,
-                        ),
-                      ),
+                      child: _buildHeader(state),
                     ),
-                  if (hasShelf)
-                    SliverPersistentHeader(
-                      pinned: true,
-                      delegate: _PinnedBarDelegate(
-                        height: 4 + 46 + 10 + 36 + 10,
-                        background: t.bg,
-                        child: _buildStickyControls(state),
-                      ),
-                    ),
-                  if (hasShelf) SliverToBoxAdapter(child: _buildShelfTitle(state)),
-                  if (state.loading)
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                      sliver: SliverGrid(
-                        gridDelegate: gridDelegate,
-                        delegate: SliverChildBuilderDelegate(
-                          (_, __) => const ShimmerBox(
-                            width: double.infinity,
-                            height: double.infinity,
-                            borderRadius: 18,
+                    if (showHighlights)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
+                          child: _ContinueHero(
+                            series: _pickHero(state.all),
+                            onTap: _open,
                           ),
-                          childCount: 6,
                         ),
                       ),
-                    )
-                  else if (!hasShelf)
-                    SliverToBoxAdapter(
-                      child: _EmptyState(onAdd: () => _openForm()),
-                    )
-                  else if (state.visible.isEmpty)
-                    SliverToBoxAdapter(
-                      child: _NoResults(onClear: _clearFilters),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                      sliver: SliverGrid(
-                        gridDelegate: gridDelegate,
-                        delegate: SliverChildBuilderDelegate(
-                          (context, i) {
-                            final s = state.visible[i];
-                            return _AnimatedGridTile(
-                              key: ValueKey('tile_${s.id}'),
-                              index: i,
-                              child: SeriesCard(
-                                key: ValueKey(s.id),
-                                series: s,
-                                onTap: () => _open(s),
-                                onLongPress: () => _showActions(s),
-                              ),
+                    if (hasShelf)
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _PinnedBarDelegate(
+                          height: 4 + 46 + 10 + 36 + 10,
+                          background: t.bg,
+                          child: _buildStickyControls(state),
+                        ),
+                      ),
+                    if (hasShelf) SliverToBoxAdapter(child: _buildShelfTitle(state)),
+                    if (state.loading)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+                        sliver: SliverGrid(
+                          gridDelegate: gridDelegate,
+                          delegate: SliverChildBuilderDelegate(
+                            (_, __) => const ShimmerBox(
+                              width: double.infinity,
+                              height: double.infinity,
+                              borderRadius: 18,
+                            ),
+                            childCount: 6,
+                          ),
+                        ),
+                      )
+                    else if (!hasShelf)
+                      SliverToBoxAdapter(
+                        child: _EmptyState(
+                          onAdd: () => _openForm(),
+                          onAddWithLink: (url, title) =>
+                              _openForm(url: url, title: title),
+                          onQuickAdd: (starter) {
+                            final s = Series.create(
+                              id: context.read<LibraryRepository>().newId(),
+                              url: starter.url,
+                              title: starter.title,
+                            ).copyWith(
+                              chapter: starter.chapter,
+                              coverUrl: starter.coverUrl,
                             );
+                            context
+                                .read<LibraryBloc>()
+                                .add(LibraryAddRequested(s));
+                            _snack('Added "${starter.title}" to your shelf');
                           },
-                          childCount: state.visible.length,
+                        ),
+                      )
+                    else if (state.visible.isEmpty)
+                      SliverToBoxAdapter(
+                        child: _NoResults(onClear: _clearFilters),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                        sliver: SliverGrid(
+                          gridDelegate: gridDelegate,
+                          delegate: SliverChildBuilderDelegate(
+                            (context, i) {
+                              final s = state.visible[i];
+                              return _AnimatedGridTile(
+                                key: ValueKey('tile_${s.id}'),
+                                index: i,
+                                child: SeriesCard(
+                                  key: ValueKey(s.id),
+                                  series: s,
+                                  onTap: () => _open(s),
+                                  onLongPress: () => _showActions(s),
+                                ),
+                              );
+                            },
+                            childCount: state.visible.length,
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             );
           },
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        isExtended: _fabExtended,
-        backgroundColor: t.accent,
-        foregroundColor: const Color(0xFF04130C),
-        elevation: 4,
-        tooltip: 'Paste a link',
-        onPressed: () => _openForm(),
-        icon: const Icon(Icons.add_link_rounded, size: 22),
-        label: const Text(
-          'Add link',
-          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.2),
+      floatingActionButton: PressableScale(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          _openForm();
+        },
+        scaleDown: 0.94,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          height: 52,
+          padding: EdgeInsets.symmetric(
+            horizontal: _fabExtended ? 20 : 16,
+          ),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF00FFA3), Color(0xFF00D486)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF00FFA3).withValues(alpha: 0.40),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.add_rounded,
+                size: 24,
+                color: Color(0xFF04130C),
+              ),
+              if (_fabExtended) ...[
+                const SizedBox(width: 8),
+                const Text(
+                  'Add Manga',
+                  style: TextStyle(
+                    color: Color(0xFF04130C),
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -1679,6 +1936,52 @@ class _SheetActionTile extends StatelessWidget {
   }
 }
 
+class _ProfileStatCard extends StatelessWidget {
+  const _ProfileStatCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      decoration: BoxDecoration(
+        color: t.surfaceCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.border),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              color: t.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(color: t.textSecondary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CountBadge extends StatelessWidget {
   const _CountBadge({required this.count});
 
@@ -1841,54 +2144,671 @@ class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant _PinnedBarDelegate old) => true;
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onAdd});
+class _StarterItem {
+  const _StarterItem({
+    required this.title,
+    required this.url,
+    required this.coverUrl,
+    required this.genre,
+    required this.chapter,
+  });
+
+  final String title;
+  final String url;
+  final String coverUrl;
+  final String genre;
+  final String chapter;
+}
+
+const _kStarters = [
+  _StarterItem(
+    title: 'Solo Leveling',
+    url: 'https://asuracomic.net/series/solo-leveling-chapter-1',
+    coverUrl:
+        'https://upload.wikimedia.org/wikipedia/en/9/9f/Solo_Leveling_webtoon_cover.png',
+    genre: 'Action • Fantasy',
+    chapter: 'Ch. 1',
+  ),
+  _StarterItem(
+    title: 'One Piece',
+    url: 'https://tcbscans.me/manga/one-piece',
+    coverUrl:
+        'https://upload.wikimedia.org/wikipedia/en/a/a3/One_Piece%2C_Volume_1.jpg',
+    genre: 'Adventure • Shonen',
+    chapter: 'Ch. 1',
+  ),
+  _StarterItem(
+    title: 'Jujutsu Kaisen',
+    url: 'https://tcbscans.me/manga/jujutsu-kaisen',
+    coverUrl:
+        'https://upload.wikimedia.org/wikipedia/en/4/46/Jujutsu_kaisen.jpg',
+    genre: 'Dark Fantasy',
+    chapter: 'Ch. 1',
+  ),
+  _StarterItem(
+    title: 'Chainsaw Man',
+    url: 'https://tcbscans.me/manga/chainsaw-man',
+    coverUrl:
+        'https://upload.wikimedia.org/wikipedia/en/3/3b/Chainsaw_Man_volume_1_cover.jpg',
+    genre: 'Action • Supernatural',
+    chapter: 'Ch. 1',
+  ),
+];
+
+class _EmptyState extends StatefulWidget {
+  const _EmptyState({
+    required this.onAdd,
+    this.onAddWithLink,
+    this.onQuickAdd,
+  });
 
   final VoidCallback onAdd;
+  final void Function(String url, String? title)? onAddWithLink;
+  final void Function(_StarterItem starter)? onQuickAdd;
+
+  @override
+  State<_EmptyState> createState() => _EmptyStateState();
+}
+
+class _EmptyStateState extends State<_EmptyState> {
+  String? _clipboardUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkClipboard();
+  }
+
+  Future<void> _checkClipboard() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim() ?? '';
+      if (text.startsWith('http://') || text.startsWith('https://')) {
+        if (mounted) setState(() => _clipboardUrl = text);
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 80),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const BrandLogo(size: 84, withGlow: true),
-          const SizedBox(height: 22),
-          Text(
-            'Your shelf is empty',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-              color: t.textPrimary,
+          // 1. Hero Animated Visual
+          Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: t.accent.withValues(alpha: 0.18),
+                        blurRadius: 50,
+                        spreadRadius: 10,
+                      ),
+                    ],
+                  ),
+                ),
+                const BrandLogo(size: 96, withGlow: true),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
+
+          // Tagline Chip
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+            decoration: BoxDecoration(
+              color: t.accent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: t.accent.withValues(alpha: 0.35),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.auto_awesome_rounded, size: 14, color: t.accent),
+                const SizedBox(width: 6),
+                Text(
+                  'PURE NATIVE MANGA READER',
+                  style: TextStyle(
+                    color: t.accent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Title & Value Proposition
           Text(
-            'Paste a link to any manga or webtoon chapter and it opens here as a clean reader. '
-            'You can also share a link from your browser straight to this app.',
+            'Your shelf is waiting for its first story',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: t.textSecondary,
-              fontSize: 14,
-              height: 1.5,
+              fontSize: 23,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.6,
+              color: t.textPrimary,
+              height: 1.25,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'Paste any manga, manhwa, or webtoon chapter URL. Shelfmark automatically strips every intrusive advertisement, optimizes high-res panels, and bookmarks your progress.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: t.textSecondary,
+                fontSize: 13.5,
+                height: 1.5,
+              ),
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add_link_rounded, size: 20),
-            label: const Text('Paste a link'),
-            style: FilledButton.styleFrom(
-              backgroundColor: t.accent,
-              foregroundColor: const Color(0xFF04130C),
-              minimumSize: const Size(200, 50),
-              textStyle: const TextStyle(fontWeight: FontWeight.w800),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(26),
+
+          // 2. Clipboard Quick-Detector Banner (if URL detected)
+          if (_clipboardUrl != null) ...[
+            PressableScale(
+              onTap: () {
+                HapticFeedback.mediumImpact();
+                if (widget.onAddWithLink != null) {
+                  widget.onAddWithLink!(_clipboardUrl!, null);
+                } else {
+                  widget.onAdd();
+                }
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: t.accent.withValues(alpha: 0.45),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: t.accent.withValues(alpha: 0.12),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: t.accent.withValues(alpha: 0.20),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.link_rounded, size: 20, color: t.accent),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Link detected in clipboard!',
+                            style: TextStyle(
+                              color: t.textPrimary,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _clipboardUrl!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: t.accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: t.accent,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'Read Now',
+                        style: TextStyle(
+                          color: Color(0xFF04130C),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ),
+          ],
+
+          // 3. Primary Big Action Button
+          PressableScale(
+            onTap: () {
+              HapticFeedback.mediumImpact();
+              widget.onAdd();
+            },
+            child: Container(
+              width: double.infinity,
+              height: 56,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                gradient: LinearGradient(
+                  colors: [
+                    t.accent,
+                    const Color(0xFF00E676),
+                  ],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: t.accent.withValues(alpha: 0.38),
+                    blurRadius: 18,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.add_link_rounded,
+                    size: 22,
+                    color: Color(0xFF04130C),
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Paste Chapter Link & Start Reading',
+                    style: TextStyle(
+                      color: Color(0xFF04130C),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 36),
+
+          // 4. Curated Starter Manga Picks
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.local_fire_department_rounded,
+                    size: 18,
+                    color: Colors.orangeAccent,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'POPULAR STARTER PICKS',
+                    style: TextStyle(
+                      color: t.textPrimary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                'One-tap add',
+                style: TextStyle(
+                  color: t.accent,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          SizedBox(
+            height: 205,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              itemCount: _kStarters.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final item = _kStarters[index];
+                return _StarterCard(
+                  item: item,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    if (widget.onAddWithLink != null) {
+                      widget.onAddWithLink!(item.url, item.title);
+                    } else {
+                      widget.onAdd();
+                    }
+                  },
+                  onQuickAdd: () {
+                    HapticFeedback.mediumImpact();
+                    widget.onQuickAdd?.call(item);
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 36),
+
+          // 5. "How Shelfmark Works" 3-Card Studio Grid
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'HOW SHELFMARK WORKS',
+              style: TextStyle(
+                color: t.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          const _FeatureTile(
+            icon: Icons.link_rounded,
+            iconColor: Colors.blueAccent,
+            title: '1. Copy Any Chapter Link',
+            subtitle:
+                'Browse your favorite manga, webtoon, or scanlation site and copy any chapter URL.',
+          ),
+          const SizedBox(height: 10),
+          _FeatureTile(
+            icon: Icons.shield_rounded,
+            iconColor: t.accent,
+            title: '2. All Advertisements Stripped',
+            subtitle:
+                'Shelfmark filters video popups, fake download redirects, and banners completely.',
+          ),
+          const SizedBox(height: 10),
+          const _FeatureTile(
+            icon: Icons.bookmark_added_rounded,
+            iconColor: Colors.purpleAccent,
+            title: '3. Never Lose Your Spot',
+            subtitle:
+                'Your reading position, page scroll, and next chapter are bookmarked automatically.',
+          ),
+          const SizedBox(height: 24),
+
+          // 6. Supported Sources Ribbon
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: t.surfaceCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: t.border),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_outline_rounded,
+                    size: 18, color: t.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Compatible with MangaDex, TCB, Webtoons, Asura, Reaper, Flame & 100+ sites',
+                    style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StarterCard extends StatelessWidget {
+  const _StarterCard({
+    required this.item,
+    required this.onTap,
+    required this.onQuickAdd,
+  });
+
+  final _StarterItem item;
+  final VoidCallback onTap;
+  final VoidCallback onQuickAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return PressableScale(
+      onTap: onTap,
+      child: Container(
+        width: 136,
+        decoration: BoxDecoration(
+          color: t.surfaceCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: t.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Poster Artwork
+              CachedNetworkImage(
+                imageUrl: item.coverUrl,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => Container(
+                  color: const Color(0xFF131722),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.menu_book_rounded,
+                            size: 28, color: t.accent.withValues(alpha: 0.6)),
+                        const SizedBox(height: 6),
+                        Text(
+                          item.title,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Gradient Shade Overlay
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.35),
+                        Colors.black.withValues(alpha: 0.92),
+                      ],
+                      stops: const [0.3, 0.65, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Content & Add Button
+              Positioned(
+                left: 10,
+                right: 10,
+                bottom: 10,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.genre,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: t.accent,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    PressableScale(
+                      onTap: onQuickAdd,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        decoration: BoxDecoration(
+                          color: t.accent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.add_rounded,
+                              size: 14,
+                              color: Color(0xFF04130C),
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Add',
+                              style: TextStyle(
+                                color: Color(0xFF04130C),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FeatureTile extends StatelessWidget {
+  const _FeatureTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.surfaceCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: iconColor),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: t.textSecondary,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

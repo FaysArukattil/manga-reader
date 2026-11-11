@@ -148,7 +148,7 @@ class ScrapeService {
 
         final response = await _client
             .get(uri, headers: headers)
-            .timeout(const Duration(seconds: 6));
+            .timeout(const Duration(seconds: 4));
         CfDiag.log(
           'http ${response.statusCode} ${uri.host} '
           'cf-mitigated=${response.headers['cf-mitigated']} '
@@ -324,15 +324,25 @@ class ScrapeService {
             // Managed challenges clear themselves in a few seconds.
             challengeSeen = true;
             stillChallenge = true;
-            await Future<void>.delayed(const Duration(milliseconds: 1000));
+            await Future<void>.delayed(const Duration(milliseconds: 700));
             continue;
           }
           stillChallenge = false;
 
+          // Fast check: if expected pages are known and already rendered, exit immediately
+          pages = await readUrls(c);
+          if (expected == 0) {
+            final e = await c.evaluateJavascript(
+              source: WebScraper.expectedPagesJs,
+            );
+            if (e is num) expected = e.toInt();
+          }
+          if (expected > 0 && pages.length >= expected) break;
+
           await c.evaluateJavascript(source: WebScraper.stripAdsJs);
           final atBottom =
               await c.evaluateJavascript(source: WebScraper.scrollStepJs);
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await Future<void>.delayed(const Duration(milliseconds: 220));
 
           pages = await readUrls(c);
           if (expected == 0) {
@@ -351,11 +361,16 @@ class ScrapeService {
           }
 
           final complete = expected > 0 && pages.length >= expected;
-          if (pages.length >= 2 && (complete || (bottom && stable >= 3))) break;
-          if (pages.length < 2 && bottom && stable >= 6) break;
+          if (pages.length >= 2 &&
+              (complete ||
+                  (bottom && stable >= 2) ||
+                  (pages.length >= 8 && stable >= 2))) {
+            break;
+          }
+          if (pages.length < 2 && bottom && stable >= 4) break;
         } catch (_) {
           // Navigation / reload in progress; try again.
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await Future<void>.delayed(const Duration(milliseconds: 220));
         }
       }
 
