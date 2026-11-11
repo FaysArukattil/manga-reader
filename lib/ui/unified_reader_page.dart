@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -112,7 +113,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    _hintTimer = Timer(const Duration(seconds: 4), () {
+    _hintTimer = Timer(const Duration(milliseconds: 2500), () {
       if (mounted) setState(() => _showSettingsHint = false);
     });
   }
@@ -195,9 +196,9 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
         child: SafeArea(
           child: DraggableScrollableSheet(
             expand: false,
-            initialChildSize: 0.65,
+            initialChildSize: 0.92,
             minChildSize: 0.4,
-            maxChildSize: 0.9,
+            maxChildSize: 0.95,
             builder: (context, scrollController) =>
                 BlocBuilder<UnifiedReaderCubit, UnifiedReaderState>(
               builder: (context, state) => ListView(
@@ -631,10 +632,10 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                     ),
                   ),
 
-                  // Floating press-and-hold tutorial banner
+                  // Floating press-and-hold tutorial banner (translucent, subtle, non-intrusive)
                   if (_showSettingsHint)
                     Positioned(
-                      top: MediaQuery.paddingOf(context).top + 16,
+                      top: MediaQuery.paddingOf(context).top + 12,
                       left: 20,
                       right: 20,
                       child: Center(
@@ -645,53 +646,57 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                           },
                           child: AnimatedOpacity(
                             opacity: _showSettingsHint ? 1.0 : 0.0,
-                            duration: const Duration(milliseconds: 300),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 9,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF13171F).withValues(alpha: 0.94),
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(
-                                  color: const Color(0xFF00B96B).withValues(alpha: 0.5),
-                                  width: 1,
+                            duration: const Duration(milliseconds: 350),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: BackdropFilter(
+                                filter:
+                                    ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 5.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.32),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.12),
+                                      width: 0.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color:
+                                            Colors.black.withValues(alpha: 0.2),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.touch_app_rounded,
+                                        color: const Color(0xFF00B96B)
+                                            .withValues(alpha: 0.8),
+                                        size: 13,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Press & hold for settings',
+                                        style: TextStyle(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.75),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                          letterSpacing: 0.1,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.6),
-                                    blurRadius: 16,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(5),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF00B96B).withValues(alpha: 0.2),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.touch_app_rounded,
-                                      color: Color(0xFF00B96B),
-                                      size: 15,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 9),
-                                  const Text(
-                                    'Press & hold anywhere for reader settings',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: -0.1,
-                                    ),
-                                  ),
-                                ],
                               ),
                             ),
                           ),
@@ -1205,8 +1210,11 @@ class _PageImageState extends State<_PageImage> {
                   onPointerUp: (e) {
                     if (!widget.isVertical) return;
                     final dy = e.position.dy - _dragStartY;
-                    final dt = math.max(1,
-                        DateTime.now().difference(_dragStartTime).inMilliseconds);
+                    final dt = math.max(
+                        1,
+                        DateTime.now()
+                            .difference(_dragStartTime)
+                            .inMilliseconds);
                     final vy = (dy / dt) * 1000.0;
 
                     final atTop = !hasScroll ||
@@ -1314,9 +1322,9 @@ class _PageImageState extends State<_PageImage> {
                   ),
                 ),
 
-              // Floating bottom pill hint: "Scroll down for more ↓"
+              // Floating bottom pill hint: "Scroll down for more ↓" (glass-like translucent)
               Positioned(
-                bottom: 22,
+                bottom: 20,
                 left: 0,
                 right: 0,
                 child: IgnorePointer(
@@ -1325,47 +1333,52 @@ class _PageImageState extends State<_PageImage> {
                     opacity: showHint ? 1.0 : 0.0,
                     duration: const Duration(milliseconds: 250),
                     child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 6.5,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              const Color(0xFF0F1116).withValues(alpha: 0.88),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFF00B96B)
-                                .withValues(alpha: 0.45),
-                            width: 0.8,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.55),
-                              blurRadius: 10,
-                              offset: const Offset(0, 3),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 5.5,
                             ),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              size: 16,
-                              color: Color(0xFF00B96B),
-                            ),
-                            SizedBox(width: 4),
-                            Text(
-                              'Scroll down for more',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.2,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.28),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.14),
+                                width: 0.6,
                               ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
-                          ],
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  size: 15,
+                                  color: const Color(0xFF00B96B)
+                                      .withValues(alpha: 0.85),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Scroll down for more',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
