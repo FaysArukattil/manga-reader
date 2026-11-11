@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../core/url_tools.dart';
 import '../data/library_repository.dart';
 import '../models/series.dart';
 import '../services/local_progress_store.dart';
@@ -210,6 +211,48 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
       clearVerificationUrl: true,
     ));
     init();
+  }
+
+  Future<void> onVerificationCompleted({
+    List<String>? verifiedPages,
+    String? chapterUrl,
+  }) async {
+    final chapterToLoad = chapterUrl ??
+        startChapterId ??
+        series.chapterUrl ??
+        series.mdChapterId ??
+        series.url;
+
+    if (verifiedPages != null && verifiedPages.length >= 2) {
+      final label = UrlTools.chapterLabel(chapterToLoad) ?? '';
+      final count = verifiedPages.length;
+      final pages = List.generate(
+        count,
+        (i) => ReaderPageItem(
+          url: verifiedPages[i],
+          chapterId: chapterToLoad,
+          chapterLabel: label,
+          pageIndex: i,
+          totalInChapter: count,
+          referer: chapterToLoad,
+        ),
+      );
+
+      _loadedChapterIds.add(chapterToLoad);
+
+      emit(state.copyWith(
+        pages: pages,
+        currentIndex: 0,
+        loading: false,
+        needsVerification: false,
+        clearVerificationUrl: true,
+        clearError: true,
+      ));
+      _triggerLocalSave();
+      return;
+    }
+
+    retry();
   }
 
   Future<void> jumpToChapter(String chapterId, {int pageIndex = 0}) async {

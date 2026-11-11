@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../services/page_cache.dart';
 import '../services/reader/chapter_source.dart';
 import '../services/reader/reader_audio.dart';
 import '../services/scrape/scrape_service.dart';
+import '../services/web_scraper.dart';
 import 'components/brand_logo.dart';
 import 'components/physics_page_turn.dart';
 
@@ -458,9 +460,16 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
               }
 
               if (state.needsVerification) {
+                final targetUrl = state.verificationUrl ?? widget.series.url;
                 return _VerificationRequiredView(
-                  url: state.verificationUrl ?? widget.series.url,
+                  url: targetUrl,
                   seriesTitle: widget.series.title,
+                  onPagesResolved: (pages) {
+                    _cubit.onVerificationCompleted(
+                      verifiedPages: pages,
+                      chapterUrl: targetUrl,
+                    );
+                  },
                   onVerified: () => _cubit.retry(),
                   onCancel: _leave,
                 );
@@ -1248,12 +1257,14 @@ class _VerificationRequiredView extends StatefulWidget {
     required this.seriesTitle,
     required this.onVerified,
     required this.onCancel,
+    this.onPagesResolved,
   });
 
   final String url;
   final String seriesTitle;
   final VoidCallback onVerified;
   final VoidCallback onCancel;
+  final ValueChanged<List<String>>? onPagesResolved;
 
   @override
   State<_VerificationRequiredView> createState() =>
@@ -1278,7 +1289,7 @@ class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
 
   Future<void> _openModal() async {
     setState(() => _modalOpened = true);
-    final verified = await showModalBottomSheet<bool>(
+    final result = await showModalBottomSheet<dynamic>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1286,7 +1297,9 @@ class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
       builder: (ctx) => _VerificationModalSheet(url: widget.url),
     );
 
-    if (verified == true) {
+    if (result is List<String> && result.length >= 2) {
+      widget.onPagesResolved?.call(result);
+    } else if (result == true) {
       widget.onVerified();
     }
   }
@@ -1376,6 +1389,13 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
   double _progress = 0;
   bool _verifiedHandled = false;
   bool _challengeSeen = false;
+  Timer? _pageExtractorTimer;
+
+  @override
+  void dispose() {
+    _pageExtractorTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> _checkIfSolved() async {
     if (_verifiedHandled || _webViewController == null) return;
@@ -1399,14 +1419,33 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
         _challengeSeen = true;
       }
 
-      // Check cookies for cf_clearance
+      // 1. Check if manga pages are rendered in DOM
+      final res = await _webViewController!.evaluateJavascript(
+        source: WebScraper.extractImagesJs,
+      );
+      final pages = <String>[];
+      if (res is List) {
+        for (final p in res) {
+          if (p != null && p.toString().isNotEmpty) {
+            pages.add(p.toString());
+          }
+        }
+      }
+
+      if (pages.length >= 2) {
+        _verifiedHandled = true;
+        _pageExtractorTimer?.cancel();
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context, pages);
+        }
+        return;
+      }
+
+      // 2. Check cookies for cf_clearance
       final cookies = await CookieManager.instance()
           .getCookies(url: WebUri(widget.url));
       final hasClearance = cookies.any((c) => c.name == 'cf_clearance');
 
-      // The challenge is ONLY solved if:
-      // 1. We actually have the cf_clearance cookie, OR
-      // 2. We saw the challenge (_challengeSeen == true) and now the title is a real manga title.
       final isRealTitle = title.trim().isNotEmpty &&
           !isChallengeTitle &&
           title.length > 4 &&
@@ -1416,7 +1455,8 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
 
       if ((hasClearance || (_challengeSeen && isRealTitle)) && !_verifiedHandled) {
         _verifiedHandled = true;
-        await Future.delayed(const Duration(milliseconds: 600));
+        _pageExtractorTimer?.cancel();
+        await Future.delayed(const Duration(milliseconds: 700));
         if (mounted && Navigator.canPop(context)) {
           Navigator.pop(context, true);
         }
@@ -1478,9 +1518,26 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
                   onPressed: () => _webViewController?.reload(),
                 ),
                 TextButton(
-                  onPressed: () {
-                    if (Navigator.canPop(context)) {
-                      Navigator.pop(context, true);
+                  onPressed: () async {
+                    _pageExtractorTimer?.cancel();
+                    final navigator = Navigator.of(context);
+                    try {
+                      final res = await _webViewController?.evaluateJavascript(
+                        source: WebScraper.extractImagesJs,
+                      );
+                      if (res is List && res.length >= 2) {
+                        final pages = res
+                            .map((e) => e.toString())
+                            .where((e) => e.isNotEmpty)
+                            .toList();
+                        if (mounted) {
+                          navigator.pop(pages);
+                          return;
+                        }
+                      }
+                    } catch (_) {}
+                    if (mounted) {
+                      navigator.pop(true);
                     }
                   },
                   child: const Text(
@@ -1494,7 +1551,10 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
                 IconButton(
                   icon:
                       const Icon(Icons.close, color: Colors.white70, size: 20),
-                  onPressed: () => Navigator.pop(context, false),
+                  onPressed: () {
+                    _pageExtractorTimer?.cancel();
+                    Navigator.pop(context, false);
+                  },
                 ),
               ],
             ),
@@ -1541,6 +1601,19 @@ class _VerificationModalSheetState extends State<_VerificationModalSheet> {
               onTitleChanged: (_, title) => _checkIfSolved(),
               onLoadStop: (controller, uri) async {
                 await _checkIfSolved();
+                _pageExtractorTimer?.cancel();
+                int checks = 0;
+                _pageExtractorTimer = Timer.periodic(
+                  const Duration(milliseconds: 700),
+                  (t) async {
+                    checks++;
+                    if (checks > 12 || _verifiedHandled) {
+                      t.cancel();
+                      return;
+                    }
+                    await _checkIfSolved();
+                  },
+                );
               },
             ),
           ),

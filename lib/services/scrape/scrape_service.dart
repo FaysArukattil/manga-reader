@@ -66,11 +66,42 @@ class ScrapeService {
         headers: headers,
       ).timeout(const Duration(seconds: 6));
 
+      // Fast check for Cloudflare / Turnstile challenges
+      final isCfMitigated =
+          response.headers['cf-mitigated'] == 'challenge' ||
+          response.headers.keys.any((k) => k.toLowerCase() == 'cf-mitigated');
+
+      final isChallengeBody = response.body.contains('Just a moment...') ||
+          response.body.contains('_cf_chl_opt') ||
+          response.body.contains('challenges.cloudflare.com') ||
+          response.body.contains('cf-turnstile');
+
+      if ((response.statusCode == 403 ||
+              response.statusCode == 503 ||
+              isCfMitigated) &&
+          isChallengeBody) {
+        bool hasClearance = false;
+        try {
+          final cookies =
+              await CookieManager.instance().getCookies(url: WebUri(url));
+          hasClearance = cookies.any((c) => c.name == 'cf_clearance');
+        } catch (_) {}
+
+        if (!hasClearance) {
+          return ScrapedChapterResult(
+            chapterUrl: url,
+            pages: const [],
+            needsVerification: true,
+            verificationUrl: url,
+          );
+        }
+      }
+
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final doc = dom.Document.html(response.body);
         final result = await adapter.extract(doc, uri);
         if (result.needsVerification) {
-          // If adapter explicitly detects verification challenge even on 200, let headless try first
+          return result;
         } else if (result.pages.length >= 2) {
           // Fast path succeeded!
           return result;
@@ -337,7 +368,12 @@ class ScrapeService {
       const Duration(seconds: 14),
       onTimeout: () {
         headless?.dispose();
-        return ScrapedChapterResult(chapterUrl: url, pages: const []);
+        return ScrapedChapterResult(
+          chapterUrl: url,
+          pages: const [],
+          needsVerification: true,
+          verificationUrl: url,
+        );
       },
     );
   }
