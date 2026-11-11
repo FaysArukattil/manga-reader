@@ -1050,6 +1050,8 @@ class _PageImage extends StatefulWidget {
 
 class _PageImageState extends State<_PageImage> {
   final ScrollController _scrollController = ScrollController();
+  int _retryNonce = 0;
+  int _autoRetries = 0;
   double _dragStartY = 0;
   DateTime _dragStartTime = DateTime.now();
 
@@ -1066,6 +1068,7 @@ class _PageImageState extends State<_PageImage> {
       width: double.infinity,
       height: double.infinity,
       child: CachedNetworkImage(
+        key: ValueKey('${widget.item.pageKey}#$_retryNonce'),
         imageUrl: widget.item.url,
         cacheKey: widget.item.pageKey,
         cacheManager: PageCache.instance,
@@ -1142,19 +1145,82 @@ class _PageImageState extends State<_PageImage> {
             ),
           ),
         ),
-        errorWidget: (_, __, ___) => const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.broken_image_rounded, color: Colors.white30, size: 36),
-              SizedBox(height: 8),
-              Text(
-                'Retrying page...',
-                style: TextStyle(color: Colors.white38, fontSize: 12),
+        errorWidget: (_, url, error) {
+          CfDiag.log('image failed ${Uri.tryParse(url)?.host}: $error');
+          // One silent automatic retry (clears any half-written cache entry).
+          if (_autoRetries < 1) {
+            _autoRetries++;
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              await PageCache.instance.removeFile(widget.item.pageKey);
+              if (mounted) setState(() => _retryNonce++);
+            });
+            return const Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white24,
+                ),
               ),
-            ],
-          ),
-        ),
+            );
+          }
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.broken_image_rounded,
+                      color: Colors.white30, size: 36),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "This page didn't load",
+                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () async {
+                          await PageCache.instance
+                              .removeFile(widget.item.pageKey);
+                          if (mounted) setState(() => _retryNonce++);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white70,
+                          side: const BorderSide(color: Colors.white24),
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          final text = 'page: ${widget.item.url}\n'
+                              'referer: ${widget.item.referer}\n'
+                              'error: $error\n\n${CfDiag.dump()}';
+                          await Clipboard.setData(ClipboardData(text: text));
+                          if (context.mounted) {
+                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              const SnackBar(
+                                content: Text('Debug info copied'),
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text(
+                          'Copy debug info',
+                          style: TextStyle(color: Colors.white38),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

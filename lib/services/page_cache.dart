@@ -5,6 +5,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'mangadex_service.dart';
+import 'scrape/cf_web_fetcher.dart';
 
 /// Disk cache for chapter page images. Keyed by URL *path* (hash/filename),
 /// not host, so a cached page is found even when MangaDex@Home hands out a
@@ -17,6 +18,9 @@ class PageCache {
       'mdPages',
       stalePeriod: const Duration(days: 30),
       maxNrOfCacheObjects: 4000,
+      // Plain HTTP first; falls back to the WebView's network stack for sites
+      // (e.g. manhuaus.com) that refuse non-browser image requests.
+      fileService: CfFileService(),
     ),
   );
 

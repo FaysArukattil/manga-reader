@@ -60,6 +60,7 @@ class ScrapeService {
     if (!forceRefresh) {
       final cached = await ScrapeCache.instance.get(url);
       if (cached != null) {
+        CfDiag.log('cache hit ${Uri.tryParse(url)?.host} pages=${cached.pages.length}');
         await CfSession.primeAll(url, cached.pages);
         return cached;
       }
@@ -130,6 +131,11 @@ class ScrapeService {
         final response = await _client
             .get(uri, headers: headers)
             .timeout(const Duration(seconds: 6));
+        CfDiag.log(
+          'http ${response.statusCode} ${uri.host} '
+          'cf-mitigated=${response.headers['cf-mitigated']} '
+          'server=${response.headers['server']}',
+        );
 
         if (CfSession.isChallengeResponse(
           response.statusCode,
@@ -244,16 +250,7 @@ class ScrapeService {
       h?.dispose();
     }
 
-    // NOTE: no custom userAgent here on purpose -> the WebView's own UA, which
-    // matches what Cloudflare sees from the verification screen.
-    final settings = InAppWebViewSettings(
-      javaScriptEnabled: true,
-      domStorageEnabled: true,
-      thirdPartyCookiesEnabled: true,
-      javaScriptCanOpenWindowsAutomatically: false,
-      mediaPlaybackRequiresUserGesture: true,
-      mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
-      useHybridComposition: true,
+    final settings = CfSession.webViewSettings(
       contentBlockers: buildContentBlockers(),
     );
 
@@ -266,6 +263,11 @@ class ScrapeService {
         try {
           final isChallenge = await controller.evaluateJavascript(
             source: CfSession.challengeProbeJs,
+          );
+
+          CfDiag.log(
+            'headless loaded ${uri.host} challenge=$isChallenge '
+            'title="${await controller.getTitle()}"',
           );
 
           if (isChallenge == true) {
@@ -379,6 +381,7 @@ class ScrapeService {
     return completer.future.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
+        CfDiag.log('headless timeout challengeSeen=$challengeSeen $url');
         final r = _needsVerification(url);
         finish(r);
         return r;

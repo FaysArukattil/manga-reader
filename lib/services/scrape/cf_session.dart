@@ -24,13 +24,40 @@ class CfSession {
   static Future<void> init() async {
     try {
       final ua = await InAppWebViewController.getDefaultUserAgent();
-      // Use it EXACTLY as the WebView reports it. cf_clearance is tied to the
-      // UA that solved the challenge, and the WebViews send this very string.
-      if (ua.trim().isNotEmpty) _userAgent = ua;
+      // Android WebView adds "; wv" which Cloudflare/Turnstile treat as an
+      // embedded-browser signal. We strip it and then send THIS exact string
+      // from every WebView, the HTTP client and image downloads (cf_clearance
+      // is bound to the UA that solved the challenge).
+      if (ua.trim().isNotEmpty) _userAgent = ua.replaceAll('; wv)', ')');
     } catch (_) {}
   }
 
   static String get userAgent => _userAgent ?? _fallbackUserAgent;
+
+  /// One settings recipe for every WebView we create (verification sheet,
+  /// headless scraper, image fetcher) so they look identical to Cloudflare.
+  static InAppWebViewSettings webViewSettings({
+    List<ContentBlocker>? contentBlockers,
+    bool popups = false,
+  }) {
+    return InAppWebViewSettings(
+      userAgent: userAgent,
+      javaScriptEnabled: true,
+      domStorageEnabled: true,
+      databaseEnabled: true,
+      thirdPartyCookiesEnabled: true,
+      javaScriptCanOpenWindowsAutomatically: popups,
+      mediaPlaybackRequiresUserGesture: true,
+      mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
+      useHybridComposition: true,
+      supportZoom: true,
+      // Android WebView sends "X-Requested-With: <your.app.package>" on every
+      // request; Cloudflare uses it to spot embedded webviews and keeps
+      // re-challenging. An empty allow-list stops the header being sent.
+      requestedWithHeaderOriginAllowList: <String>{},
+      contentBlockers: contentBlockers,
+    );
+  }
 
   // ---------------------------------------------------------------- cookies
 
@@ -176,4 +203,20 @@ class CfSession {
     // A 200 can still be an interstitial (rare); require strong markers.
     return looksLikeChallengeHtml(body);
   }
+}
+
+/// Tiny in-memory log so "why is this blocked?" can be answered with facts.
+/// Shown/copied from the reader (see "Copy debug info").
+class CfDiag {
+  CfDiag._();
+  static final List<String> _lines = [];
+
+  static void log(String message) {
+    final t = DateTime.now().toIso8601String().substring(11, 19);
+    _lines.add('$t $message');
+    if (_lines.length > 150) _lines.removeRange(0, _lines.length - 150);
+  }
+
+  static String dump() =>
+      'UA: ${CfSession.userAgent}\n${_lines.join('\n')}';
 }

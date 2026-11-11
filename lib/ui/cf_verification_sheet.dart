@@ -271,19 +271,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
           Expanded(
             child: InAppWebView(
               initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-              // No custom userAgent: the real WebView UA is what passes
-              // Turnstile, and it matches CfSession.userAgent everywhere else.
-              initialSettings: InAppWebViewSettings(
-                javaScriptEnabled: true,
-                domStorageEnabled: true,
-                databaseEnabled: true,
-                thirdPartyCookiesEnabled: true,
-                javaScriptCanOpenWindowsAutomatically: true,
-                useHybridComposition: true,
-                supportZoom: true,
-                mixedContentMode:
-                    MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
-              ),
+              initialSettings: CfSession.webViewSettings(popups: true),
               onWebViewCreated: (c) => _web = c,
               onProgressChanged: (_, p) {
                 if (mounted) setState(() => _progress = p / 100);
