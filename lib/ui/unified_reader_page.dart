@@ -14,6 +14,7 @@ import '../services/reader/chapter_source.dart';
 import '../services/reader/reader_audio.dart';
 import '../services/scrape/scrape_service.dart';
 import 'components/brand_logo.dart';
+import 'components/physics_page_turn.dart';
 
 /// Pure content native book reader:
 /// - 100% full-bleed pages on black.
@@ -684,15 +685,52 @@ class _StreamPager extends StatefulWidget {
 class _StreamPagerState extends State<_StreamPager> {
   int get _count => widget.pages.length + (widget.isAllCaughtUp ? 1 : 0);
   int? _lastSoundPage;
+  late final PhysicsPageTurnController _turnController;
 
   @override
   void initState() {
     super.initState();
     _lastSoundPage = widget.initialPage;
+    _turnController = PhysicsPageTurnController();
+    widget.controller.addListener(_syncFromPageController);
     ReaderAudio.instance.init();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _prefetch(widget.initialPage);
     });
+  }
+
+  @override
+  void didUpdateWidget(_StreamPager oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_syncFromPageController);
+      widget.controller.addListener(_syncFromPageController);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_syncFromPageController);
+    _turnController.dispose();
+    super.dispose();
+  }
+
+  void _syncFromPageController() {
+    if (widget.controller.hasClients && widget.controller.page != null) {
+      final target = widget.controller.page!.round();
+      if (_turnController.currentPage != target) {
+        _turnController.jumpToPage(target);
+      }
+    }
+  }
+
+  void _onPageTurned(int p) {
+    if (p != _lastSoundPage) {
+      _lastSoundPage = p;
+      ReaderAudio.instance.playPageTurn(soundEnabled: widget.soundEffect);
+    }
+    widget.onPageChanged(math.min(p, widget.pages.length - 1));
+    _prefetch(p);
   }
 
   void _prefetch(int page) {
@@ -729,92 +767,114 @@ class _StreamPagerState extends State<_StreamPager> {
     );
   }
 
+  Widget _buildPageItem(BuildContext context, int i) {
+    if (i == widget.pages.length) {
+      return const _CaughtUpCard();
+    }
+
+    final item = widget.pages[i];
+    final bool isFirstInChapter =
+        i > 0 && widget.pages[i - 1].chapterId != item.chapterId;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(child: _PageImage(item: item)),
+        // Barely visible chapter seam marker
+        if (isFirstInChapter)
+          Positioned(
+            top: 16,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: Colors.white12,
+                    width: 0.5,
+                  ),
+                ),
+                child: Text(
+                  item.chapterLabel,
+                  style: const TextStyle(
+                    color: Color(0xFF00B96B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final flip = widget.rtl && !widget.vertical;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapUp: (d) {
-        final size = context.size;
-        if (size == null) return;
-        final frac = widget.vertical
-            ? d.localPosition.dy / size.height
-            : d.localPosition.dx / size.width;
-        if (frac < 0.28) {
-          _go(flip ? 1 : -1);
-        } else if (frac > 0.72) {
-          _go(flip ? -1 : 1);
-        } else {
-          widget.onCenterTap();
-        }
+    if (widget.vertical) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) {
+          final size = context.size;
+          if (size == null) return;
+          final frac = d.localPosition.dy / size.height;
+          if (frac < 0.28) {
+            _go(-1);
+          } else if (frac > 0.72) {
+            _go(1);
+          } else {
+            widget.onCenterTap();
+          }
+        },
+        child: PageView.builder(
+          controller: widget.controller,
+          scrollDirection: Axis.vertical,
+          itemCount: _count,
+          onPageChanged: _onPageTurned,
+          itemBuilder: (context, i) {
+            return _AnimatedPage(
+              controller: widget.controller,
+              index: i,
+              vertical: true,
+              rtl: false,
+              pageFlipEffect: false,
+              child: _buildPageItem(context, i),
+            );
+          },
+        ),
+      );
+    }
+
+    return PhysicsPageTurn(
+      controller: _turnController,
+      itemCount: _count,
+      initialPage: widget.initialPage,
+      rtl: widget.rtl,
+      pageFlipEffect: widget.pageFlipEffect,
+      onPageChanged: _onPageTurned,
+      onPageTurnStart: (speed) {
+        ReaderAudio.instance.playPageTurn(
+          speed: speed,
+          soundEnabled: widget.soundEffect,
+        );
       },
-      child: PageView.builder(
-        controller: widget.controller,
-        scrollDirection: widget.vertical ? Axis.vertical : Axis.horizontal,
-        reverse: flip,
-        itemCount: _count,
-        onPageChanged: (p) {
-          if (p != _lastSoundPage) {
-            _lastSoundPage = p;
-            ReaderAudio.instance.playPageTurn(soundEnabled: widget.soundEffect);
-          }
-          widget.onPageChanged(math.min(p, widget.pages.length - 1));
-          _prefetch(p);
-        },
-        itemBuilder: (context, i) {
-          if (i == widget.pages.length) {
-            return const _CaughtUpCard();
-          }
-
-          final item = widget.pages[i];
-          final bool isFirstInChapter =
-              i > 0 && widget.pages[i - 1].chapterId != item.chapterId;
-
-          return _AnimatedPage(
-            controller: widget.controller,
-            index: i,
-            vertical: widget.vertical,
-            rtl: widget.rtl,
-            pageFlipEffect: widget.pageFlipEffect,
-            child: Stack(
-              children: [
-                Positioned.fill(child: _PageImage(item: item)),
-                // Barely visible chapter seam marker
-                if (isFirstInChapter)
-                  Positioned(
-                    top: 16,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.8),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white12,
-                            width: 0.5,
-                          ),
-                        ),
-                        child: Text(
-                          item.chapterLabel,
-                          style: const TextStyle(
-                            color: Color(0xFF00B96B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
-      ),
+      onPagePeel: (speed) {
+        ReaderAudio.instance.playPagePeel(
+          speed: speed,
+          soundEnabled: widget.soundEffect,
+        );
+      },
+      onTurnCancel: () {
+        ReaderAudio.instance.stop();
+      },
+      onCenterTap: widget.onCenterTap,
+      itemBuilder: _buildPageItem,
     );
   }
 }
@@ -915,50 +975,88 @@ class _AnimatedPage extends StatelessWidget {
 
 // ------------------------------------------------------------- page image
 
-class _PageImage extends StatelessWidget {
+class _PageImage extends StatefulWidget {
   const _PageImage({required this.item});
 
   final ReaderPageItem item;
 
   @override
+  State<_PageImage> createState() => _PageImageState();
+}
+
+class _PageImageState extends State<_PageImage> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return InteractiveViewer(
-      minScale: 1.0,
-      maxScale: 3.5,
-      child: Center(
-        child: CachedNetworkImage(
-          imageUrl: item.url,
-          cacheKey: item.pageKey,
-          cacheManager: PageCache.instance,
-          httpHeaders: {
-            'User-Agent': ScrapeService.mobileUserAgent,
-            if (item.referer != null) 'Referer': item.referer!,
-          },
-          fit: BoxFit.contain,
-          fadeInDuration: Duration.zero,
-          placeholder: (_, __) => const Center(
-            child: SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white24,
-              ),
+    return Container(
+      color: Colors.black,
+      width: double.infinity,
+      height: double.infinity,
+      child: CachedNetworkImage(
+        imageUrl: widget.item.url,
+        cacheKey: widget.item.pageKey,
+        cacheManager: PageCache.instance,
+        httpHeaders: {
+          'User-Agent': ScrapeService.mobileUserAgent,
+          if (widget.item.referer != null) 'Referer': widget.item.referer!,
+        },
+        fadeInDuration: Duration.zero,
+        imageBuilder: (context, imageProvider) {
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              return InteractiveViewer(
+                minScale: 1.0,
+                maxScale: 3.5,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  physics: const ClampingScrollPhysics(),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minWidth: constraints.maxWidth,
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: Center(
+                      child: Image(
+                        image: imageProvider,
+                        width: constraints.maxWidth,
+                        fit: BoxFit.fitWidth,
+                        filterQuality: FilterQuality.medium,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+        placeholder: (_, __) => const Center(
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white24,
             ),
           ),
-          errorWidget: (_, __, ___) => const Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.broken_image_rounded,
-                    color: Colors.white30, size: 36),
-                SizedBox(height: 8),
-                Text(
-                  'Retrying page...',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-              ],
-            ),
+        ),
+        errorWidget: (_, __, ___) => const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.broken_image_rounded, color: Colors.white30, size: 36),
+              SizedBox(height: 8),
+              Text(
+                'Retrying page...',
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
           ),
         ),
       ),

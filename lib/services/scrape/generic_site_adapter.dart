@@ -525,10 +525,31 @@ class GenericSiteAdapter implements SiteAdapter {
       if (lower.contains(k)) return true;
     }
 
+    // Filter out thumbnail/avatar/widget classes
+    final cls = (img.attributes['class'] ?? '').toLowerCase();
+    if (cls.contains('thumb') ||
+        cls.contains('avatar') ||
+        cls.contains('icon') ||
+        cls.contains('badge') ||
+        cls.contains('author') ||
+        cls.contains('logo')) {
+      return true;
+    }
+
+    // Check if inside a chapter link (e.g. <a href="/chapter-12"><img ...></a>)
+    final parent = img.parent;
+    if (parent != null && parent.localName == 'a') {
+      final parentHref = (parent.attributes['href'] ?? '').toLowerCase();
+      if (parentHref.contains('chapter') || parentHref.contains('/manga/')) {
+        return true;
+      }
+    }
+
     final width = int.tryParse(img.attributes['width'] ?? '');
     final height = int.tryParse(img.attributes['height'] ?? '');
-    if (width != null && height != null && width > 0 && height > 0) {
-      if (width < 140 && height < 140) return true;
+    if ((width != null && width > 0 && width < 220) ||
+        (height != null && height > 0 && height < 220)) {
+      return true;
     }
 
     return false;

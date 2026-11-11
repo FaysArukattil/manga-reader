@@ -56,6 +56,11 @@ class SeriesCard extends StatelessWidget {
     if (cover == null || cover.isEmpty) return _fallbackImage(context);
     return CachedNetworkImage(
       imageUrl: cover,
+      httpHeaders: {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 14; Mobile; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+        if (series.url.isNotEmpty) 'Referer': series.url,
+      },
       fit: BoxFit.cover,
       memCacheWidth: 420,
       fadeInDuration: const Duration(milliseconds: 140),
