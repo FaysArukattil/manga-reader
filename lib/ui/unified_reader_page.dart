@@ -4,7 +4,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../blocs/unified_reader_cubit.dart';
 import '../data/library_repository.dart';
@@ -13,10 +12,11 @@ import '../services/local_progress_store.dart';
 import '../services/page_cache.dart';
 import '../services/reader/chapter_source.dart';
 import '../services/reader/reader_audio.dart';
+import '../services/scrape/cf_session.dart';
 import '../services/scrape/scrape_service.dart';
-import '../services/web_scraper.dart';
 import 'components/brand_logo.dart';
 import 'components/physics_page_turn.dart';
+import 'cf_verification_sheet.dart';
 
 /// Pure content native book reader:
 /// - 100% full-bleed pages on black.
@@ -752,10 +752,7 @@ class _StreamPagerState extends State<_StreamPager> {
             item.url,
             cacheKey: item.pageKey,
             cacheManager: PageCache.instance,
-            headers: {
-              'User-Agent': ScrapeService.mobileUserAgent,
-              if (item.referer != null) 'Referer': item.referer!,
-            },
+            headers: CfSession.imageHeaders(item.url, item.referer),
           ),
           context,
         );
@@ -1039,10 +1036,8 @@ class _PageImageState extends State<_PageImage> {
         imageUrl: widget.item.url,
         cacheKey: widget.item.pageKey,
         cacheManager: PageCache.instance,
-        httpHeaders: {
-          'User-Agent': ScrapeService.mobileUserAgent,
-          if (widget.item.referer != null) 'Referer': widget.item.referer!,
-        },
+        httpHeaders:
+            CfSession.imageHeaders(widget.item.url, widget.item.referer),
         fadeInDuration: Duration.zero,
         imageBuilder: (context, imageProvider) {
           return LayoutBuilder(
@@ -1056,8 +1051,8 @@ class _PageImageState extends State<_PageImage> {
                 onPointerUp: (e) {
                   if (!widget.isVertical) return;
                   final dy = e.position.dy - _dragStartY;
-                  final dt = math.max(
-                      1, DateTime.now().difference(_dragStartTime).inMilliseconds);
+                  final dt = math.max(1,
+                      DateTime.now().difference(_dragStartTime).inMilliseconds);
                   final vy = (dy / dt) * 1000.0;
 
                   final hasScroll = _scrollController.hasClients &&
@@ -1294,7 +1289,7 @@ class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       enableDrag: false,
-      builder: (ctx) => _VerificationModalSheet(url: widget.url),
+      builder: (ctx) => CfVerificationSheet(url: widget.url),
     );
 
     if (result is List<String> && result.length >= 2) {
@@ -1369,255 +1364,6 @@ class _VerificationRequiredViewState extends State<_VerificationRequiredView> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _VerificationModalSheet extends StatefulWidget {
-  const _VerificationModalSheet({required this.url});
-
-  final String url;
-
-  @override
-  State<_VerificationModalSheet> createState() =>
-      _VerificationModalSheetState();
-}
-
-class _VerificationModalSheetState extends State<_VerificationModalSheet> {
-  InAppWebViewController? _webViewController;
-  double _progress = 0;
-  bool _verifiedHandled = false;
-  bool _challengeSeen = false;
-  Timer? _pageExtractorTimer;
-
-  @override
-  void dispose() {
-    _pageExtractorTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _checkIfSolved() async {
-    if (_verifiedHandled || _webViewController == null) return;
-
-    try {
-      final title = await _webViewController!.getTitle() ?? '';
-      final lower = title.toLowerCase();
-      final isChallengeTitle = lower.contains('just a moment') ||
-          lower.contains('turnstile') ||
-          lower.contains('cloudflare') ||
-          lower.contains('security check') ||
-          lower.contains('attention required') ||
-          lower.contains('verify you are human');
-
-      final isChallengeDom = await _webViewController!.evaluateJavascript(
-        source:
-            '(function(){ return document.querySelector("script[src*=\'challenge-platform\'], #challenge-stage, #challenge-error-text") !== null || window._cf_chl_opt !== undefined; })()',
-      );
-
-      if (isChallengeTitle || isChallengeDom == true) {
-        _challengeSeen = true;
-      }
-
-      // 1. Check if manga pages are rendered in DOM
-      final res = await _webViewController!.evaluateJavascript(
-        source: WebScraper.extractImagesJs,
-      );
-      final pages = <String>[];
-      if (res is List) {
-        for (final p in res) {
-          if (p != null && p.toString().isNotEmpty) {
-            pages.add(p.toString());
-          }
-        }
-      }
-
-      if (pages.length >= 2) {
-        _verifiedHandled = true;
-        _pageExtractorTimer?.cancel();
-        if (mounted && Navigator.canPop(context)) {
-          Navigator.pop(context, pages);
-        }
-        return;
-      }
-
-      // 2. Check cookies for cf_clearance
-      final cookies = await CookieManager.instance()
-          .getCookies(url: WebUri(widget.url));
-      final hasClearance = cookies.any((c) => c.name == 'cf_clearance');
-
-      final isRealTitle = title.trim().isNotEmpty &&
-          !isChallengeTitle &&
-          title.length > 4 &&
-          !title.contains('403') &&
-          !title.contains('503') &&
-          !title.contains('about:blank');
-
-      if ((hasClearance || (_challengeSeen && isRealTitle)) && !_verifiedHandled) {
-        _verifiedHandled = true;
-        _pageExtractorTimer?.cancel();
-        await Future.delayed(const Duration(milliseconds: 700));
-        if (mounted && Navigator.canPop(context)) {
-          Navigator.pop(context, true);
-        }
-      }
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final host = Uri.tryParse(widget.url)?.host ?? widget.url;
-
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.88,
-      decoration: const BoxDecoration(
-        color: Color(0xFF141416),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.shield_outlined,
-                  color: Color(0xFF00B96B),
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Security Verification',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        host,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white38,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.refresh,
-                      color: Colors.white70, size: 20),
-                  tooltip: 'Reload',
-                  onPressed: () => _webViewController?.reload(),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    _pageExtractorTimer?.cancel();
-                    final navigator = Navigator.of(context);
-                    try {
-                      final res = await _webViewController?.evaluateJavascript(
-                        source: WebScraper.extractImagesJs,
-                      );
-                      if (res is List && res.length >= 2) {
-                        final pages = res
-                            .map((e) => e.toString())
-                            .where((e) => e.isNotEmpty)
-                            .toList();
-                        if (mounted) {
-                          navigator.pop(pages);
-                          return;
-                        }
-                      }
-                    } catch (_) {}
-                    if (mounted) {
-                      navigator.pop(true);
-                    }
-                  },
-                  child: const Text(
-                    'Done',
-                    style: TextStyle(
-                      color: Color(0xFF00B96B),
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon:
-                      const Icon(Icons.close, color: Colors.white70, size: 20),
-                  onPressed: () {
-                    _pageExtractorTimer?.cancel();
-                    Navigator.pop(context, false);
-                  },
-                ),
-              ],
-            ),
-          ),
-          if (_progress < 1.0)
-            LinearProgressIndicator(
-              value: _progress,
-              minHeight: 2,
-              backgroundColor: Colors.transparent,
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFF00B96B)),
-            ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.white.withValues(alpha: 0.04),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, size: 14, color: Colors.white54),
-                SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Complete the "Verify you are human" check below. It will continue automatically.',
-                    style: TextStyle(color: Colors.white70, fontSize: 11),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: InAppWebView(
-              initialUrlRequest: URLRequest(url: WebUri(widget.url)),
-              initialSettings: InAppWebViewSettings(
-                userAgent: ScrapeService.mobileUserAgent,
-                javaScriptEnabled: true,
-                domStorageEnabled: true,
-                thirdPartyCookiesEnabled: true,
-                supportZoom: true,
-              ),
-              onWebViewCreated: (c) => _webViewController = c,
-              onProgressChanged: (_, p) {
-                if (mounted) setState(() => _progress = p / 100);
-                _checkIfSolved();
-              },
-              onTitleChanged: (_, title) => _checkIfSolved(),
-              onLoadStop: (controller, uri) async {
-                await _checkIfSolved();
-                _pageExtractorTimer?.cancel();
-                int checks = 0;
-                _pageExtractorTimer = Timer.periodic(
-                  const Duration(milliseconds: 700),
-                  (t) async {
-                    checks++;
-                    if (checks > 12 || _verifiedHandled) {
-                      t.cancel();
-                      return;
-                    }
-                    await _checkIfSolved();
-                  },
-                );
-              },
-            ),
-          ),
-        ],
       ),
     );
   }

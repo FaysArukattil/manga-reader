@@ -7,6 +7,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'app.dart';
 import 'firebase_options.dart';
 import 'services/page_cache.dart';
+import 'services/scrape/cf_session.dart';
 import 'services/share_service.dart';
 import 'services/thumbnail_store.dart';
 
@@ -23,6 +24,9 @@ Future<void> main() async {
   } catch (e, st) {
     debugPrint('Firebase initialization error: $e\n$st');
   }
+
+  // Real WebView user-agent, shared by every Cloudflare-related request.
+  await CfSession.init();
 
   if (kDebugMode) {
     try {

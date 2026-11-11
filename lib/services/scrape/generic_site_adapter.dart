@@ -2,6 +2,7 @@ import 'package:html/dom.dart' as dom;
 
 import '../../core/url_tools.dart';
 import '../../ui/ad_block.dart';
+import 'cf_session.dart';
 import 'site_adapter.dart';
 
 class GenericSiteAdapter implements SiteAdapter {
@@ -66,18 +67,9 @@ class GenericSiteAdapter implements SiteAdapter {
     dom.Document document,
     Uri pageUri,
   ) async {
-    // 0. Detect Cloudflare / Security verification challenge
-    final pageTitle = document.querySelector('title')?.text.trim() ?? '';
-    final bodyText = document.body?.text ?? '';
-    final html = document.outerHtml;
-    if (pageTitle.contains('Just a moment...') ||
-        pageTitle.contains('Verify you are human') ||
-        pageTitle.contains('Attention Required! | Cloudflare') ||
-        bodyText.contains('challenges.cloudflare.com') ||
-        bodyText.contains('cf-turnstile') ||
-        html.contains('_cf_chl_opt') ||
-        html.contains('challenges.cloudflare.com') ||
-        html.contains('challenge-platform')) {
+    // 0. Detect a real Cloudflare interstitial (NOT merely a site that uses
+    //    Cloudflare / Turnstile somewhere on the page).
+    if (CfSession.looksLikeChallengeHtml(document.outerHtml)) {
       return ScrapedChapterResult(
         chapterUrl: pageUri.toString(),
         pages: const [],
@@ -221,9 +213,7 @@ class GenericSiteAdapter implements SiteAdapter {
     final og = doc
             .querySelector('meta[property="og:image"]')
             ?.attributes['content'] ??
-        doc
-            .querySelector('meta[name="twitter:image"]')
-            ?.attributes['content'];
+        doc.querySelector('meta[name="twitter:image"]')?.attributes['content'];
     if (og != null && og.trim().isNotEmpty) {
       final res = _resolveUrl(og.trim(), baseUri);
       if (res != null && !_isJunkCoverUrl(res)) return res;
