@@ -1096,7 +1096,6 @@ class _LibraryPageState extends State<LibraryPage> {
   // ---------------------------------------------------------------------------
 
   Widget _buildTopPortion(LibraryState state) {
-    final t = context.tokens;
     final user = context.read<AuthBloc>().state.user;
     final topPadding = MediaQuery.paddingOf(context).top;
     final hero = _pickHero(state.all);
@@ -1113,25 +1112,40 @@ class _LibraryPageState extends State<LibraryPage> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: t.surface,
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF031A12), // deep forest emerald at status bar
+            Color(0xFF062C1E), // rich emerald ambient
+            Color(0xFF0A442E), // luminous emerald glow
+            Color(0xFF05261A), // deep emerald base
+          ],
+          stops: [0.0, 0.35, 0.75, 1.0],
+        ),
         borderRadius: const BorderRadius.vertical(
           bottom: Radius.circular(28),
         ),
         border: Border(
           bottom: BorderSide(
-            color: t.border.withValues(alpha: 0.9),
+            color: const Color(0xFF00C875).withValues(alpha: 0.35),
             width: 1.5,
           ),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.55),
-            blurRadius: 20,
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 18,
             offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: const Color(0xFF00C875).withValues(alpha: 0.16),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(16, topPadding + 10, 16, 16),
+      padding: EdgeInsets.fromLTRB(16, topPadding + 10, 16, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1149,8 +1163,8 @@ class _LibraryPageState extends State<LibraryPage> {
                     children: [
                       Text(
                         _greeting(),
-                        style: TextStyle(
-                          color: t.textTertiary,
+                        style: const TextStyle(
+                          color: Color(0xFF86E3B8),
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.3,
@@ -1159,8 +1173,8 @@ class _LibraryPageState extends State<LibraryPage> {
                       const SizedBox(height: 2),
                       Text(
                         welcomeTitle,
-                        style: TextStyle(
-                          color: t.textPrimary,
+                        style: const TextStyle(
+                          color: Colors.white,
                           fontSize: 27,
                           fontWeight: FontWeight.w800,
                           height: 1.15,
@@ -1168,10 +1182,10 @@ class _LibraryPageState extends State<LibraryPage> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text(
+                      const Text(
                         "What's next to read?",
                         style: TextStyle(
-                          color: t.textSecondary,
+                          color: Color(0xFFA5DFCA),
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1190,23 +1204,23 @@ class _LibraryPageState extends State<LibraryPage> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: t.accent.withValues(alpha: 0.7),
+                        color: const Color(0xFF00E676).withValues(alpha: 0.8),
                         width: 1.6,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: t.accent.withValues(alpha: 0.25),
+                          color: const Color(0xFF00E676).withValues(alpha: 0.35),
                           blurRadius: 10,
                         ),
                       ],
                     ),
                     child: CircleAvatar(
-                      backgroundColor: t.surfaceCard,
+                      backgroundColor: const Color(0xFF042015),
                       backgroundImage: user?.photoURL != null
                           ? NetworkImage(user!.photoURL!)
                           : null,
                       child: user?.photoURL == null
-                          ? Icon(Icons.person, size: 22, color: t.textSecondary)
+                          ? const Icon(Icons.person, size: 22, color: Color(0xFF86E3B8))
                           : null,
                     ),
                   ),
@@ -1215,9 +1229,9 @@ class _LibraryPageState extends State<LibraryPage> {
             ),
           ),
 
-          // Continue Reading Card (expanded vertically and horizontally to the edge)
+          // Continue Reading Card (integrated directly into the green top portion)
           if (showContinue) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             _ExpandedContinueCard(
               series: hero,
               onTap: _open,
@@ -2062,7 +2076,6 @@ class _ExpandedContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = context.tokens;
     final resume = series.resumeLabel;
 
     return PressableScale(
@@ -2072,10 +2085,11 @@ class _ExpandedContinueCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: t.surfaceCard,
+          // Frosted emerald glass integration: blends naturally into the green header
+          color: const Color(0xFF031A12).withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: t.border.withValues(alpha: 0.8),
+            color: Colors.white.withValues(alpha: 0.16),
             width: 1.0,
           ),
           boxShadow: [
@@ -2113,16 +2127,22 @@ class _ExpandedContinueCard extends StatelessWidget {
                       Container(
                         width: 6,
                         height: 6,
-                        decoration: BoxDecoration(
-                          color: t.accent,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF00E676),
                           shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0xFF00E676),
+                              blurRadius: 6,
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 6),
-                      Text(
+                      const Text(
                         'CONTINUE READING',
                         style: TextStyle(
-                          color: t.accent,
+                          color: Color(0xFF00E676),
                           fontSize: 10.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.8,
@@ -2135,8 +2155,8 @@ class _ExpandedContinueCard extends StatelessWidget {
                     series.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: t.textPrimary,
+                    style: const TextStyle(
+                      color: Colors.white,
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       height: 1.2,
@@ -2145,10 +2165,10 @@ class _ExpandedContinueCard extends StatelessWidget {
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.auto_stories_rounded,
                         size: 13,
-                        color: t.textSecondary,
+                        color: Color(0xFFA5DFCA),
                       ),
                       const SizedBox(width: 4),
                       Expanded(
@@ -2156,8 +2176,8 @@ class _ExpandedContinueCard extends StatelessWidget {
                           resume.isNotEmpty ? resume : series.host,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: t.textSecondary,
+                          style: const TextStyle(
+                            color: Color(0xFFA5DFCA),
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
@@ -2173,12 +2193,12 @@ class _ExpandedContinueCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: t.accent,
+                color: const Color(0xFF00E676),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: t.accent.withValues(alpha: 0.35),
-                    blurRadius: 8,
+                    color: const Color(0xFF00E676).withValues(alpha: 0.4),
+                    blurRadius: 10,
                     offset: const Offset(0, 2),
                   ),
                 ],
@@ -2189,13 +2209,13 @@ class _ExpandedContinueCard extends StatelessWidget {
                   Icon(
                     Icons.play_arrow_rounded,
                     size: 18,
-                    color: Color(0xFF04130C),
+                    color: Color(0xFF032216),
                   ),
                   SizedBox(width: 3),
                   Text(
                     'Resume',
                     style: TextStyle(
-                      color: Color(0xFF04130C),
+                      color: Color(0xFF032216),
                       fontSize: 12.5,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.2,
