@@ -853,7 +853,9 @@ class _StreamPagerState extends State<_StreamPager> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _prefetch(widget.initialPage);
-        if (widget.vertical && widget.initialPage > 0 && widget.pages.isNotEmpty) {
+        if (widget.vertical &&
+            widget.initialPage > 0 &&
+            widget.pages.isNotEmpty) {
           _scrollToIndex(widget.initialPage);
         }
       }
@@ -1661,8 +1663,7 @@ class _ContinuousWebtoonSliceState extends State<_ContinuousWebtoonSlice> {
       imageUrl: widget.item.url,
       cacheKey: pageKey,
       cacheManager: PageCache.instance,
-      httpHeaders:
-          CfSession.imageHeaders(widget.item.url, widget.item.referer),
+      httpHeaders: CfSession.imageHeaders(widget.item.url, widget.item.referer),
       fadeInDuration: Duration.zero,
       fadeOutDuration: Duration.zero,
       width: screenWidth,
