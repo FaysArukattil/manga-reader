@@ -27,12 +27,13 @@ class ReaderState extends Equatable {
     String? chapter,
     String? blocked,
     bool clearBlocked = false,
-  }) => ReaderState(
-    mode: mode ?? this.mode,
-    dim: dim ?? this.dim,
-    chapter: chapter ?? this.chapter,
-    blocked: clearBlocked ? null : (blocked ?? this.blocked),
-  );
+  }) =>
+      ReaderState(
+        mode: mode ?? this.mode,
+        dim: dim ?? this.dim,
+        chapter: chapter ?? this.chapter,
+        blocked: clearBlocked ? null : (blocked ?? this.blocked),
+      );
 
   @override
   List<Object?> get props => [mode, dim, chapter, blocked];
@@ -46,20 +47,20 @@ class ReaderCubit extends Cubit<ReaderState> {
     required Series series,
     required LibraryRepository library,
     required AniListService anilist,
-  }) : _series = series,
-       _library = library,
-       _anilist = anilist,
-       _currentUrl = series.url,
-       _savedUrl = series.url,
-       _savedScroll = series.scroll,
-       _allowedRoots = {UrlTools.registrableDomain(series.host)},
-       super(
-         ReaderState(
-           mode: series.mode,
-           dim: series.dim,
-           chapter: series.chapter,
-         ),
-       );
+  })  : _series = series,
+        _library = library,
+        _anilist = anilist,
+        _currentUrl = series.url,
+        _savedUrl = series.url,
+        _savedScroll = series.scroll,
+        _allowedRoots = {UrlTools.registrableDomain(series.host)},
+        super(
+          ReaderState(
+            mode: series.mode,
+            dim: series.dim,
+            chapter: series.chapter,
+          ),
+        );
 
   Series _series;
   final LibraryRepository _library;
@@ -128,10 +129,13 @@ class ReaderCubit extends Cubit<ReaderState> {
     final title = UrlTools.cleanTitle(raw);
     if (title.length < 2) return;
     _series = _series.copyWith(title: title, titleAuto: false);
-    _library.update(_series.id, {
-      'title': title,
-      'titleAuto': false,
-    }, touch: false);
+    _library.update(
+        _series.id,
+        {
+          'title': title,
+          'titleAuto': false,
+        },
+        touch: false);
     final cover = await _anilist.findCover(title);
     if (cover != null) {
       _library.update(_series.id, {'coverUrl': cover}, touch: false);

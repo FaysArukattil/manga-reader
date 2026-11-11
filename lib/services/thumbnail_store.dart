@@ -35,6 +35,13 @@ class ThumbnailStore {
     await FileImage(file).evict();
   }
 
+  Future<void> clear() async {
+    final ids = _ids.toList();
+    for (final id in ids) {
+      await delete(id);
+    }
+  }
+
   Future<void> delete(String id) async {
     final file = File('${_dir.path}/$id.jpg');
     _ids.remove(id);

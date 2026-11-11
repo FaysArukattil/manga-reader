@@ -6,47 +6,36 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'app.dart';
 import 'firebase_options.dart';
+import 'services/page_cache.dart';
 import 'services/share_service.dart';
 import 'services/thumbnail_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    // Offline persistence keeps the shelf readable without a connection.
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: 100 * 1024 * 1024,
     );
-  } catch (e, stack) {
-    debugPrint('Firebase.initializeApp warning/error: $e\n$stack');
+  } catch (e, st) {
+    debugPrint('Firebase initialization error: $e\n$st');
   }
 
   if (kDebugMode) {
     try {
       await InAppWebViewController.setWebContentsDebuggingEnabled(true);
-    } catch (e) {
-      debugPrint('InAppWebViewController error: $e');
-    }
+    } catch (_) {}
   }
 
-  late final ThumbnailStore thumbs;
-  try {
-    thumbs = await ThumbnailStore.create();
-  } catch (e) {
-    debugPrint('ThumbnailStore.create error: $e');
-    rethrow;
-  }
-
+  final thumbs = await ThumbnailStore.create();
+  final chapterStore = await ChapterStore.create();
   final share = ShareService();
-  try {
-    await share.init();
-  } catch (e) {
-    debugPrint('ShareService.init error: $e');
-  }
+  await share.init();
 
-  runApp(ShelfmarkApp(thumbs: thumbs, share: share));
+  runApp(
+    ShelfmarkApp(thumbs: thumbs, share: share, chapterStore: chapterStore),
+  );
 }

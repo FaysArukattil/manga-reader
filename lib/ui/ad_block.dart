@@ -2,7 +2,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 /// Ad / popup / tracker networks blocked inside the reader WebView.
 /// One combined regex rule keeps per-request overhead (and battery) low.
-const List<String> _blockedDomains = [
+const List<String> blockedDomains = [
   'doubleclick.net',
   'googlesyndication.com',
   'googleadservices.com',
@@ -61,11 +61,15 @@ const List<String> _blockedDomains = [
 const String _hideSelectors =
     'ins.adsbygoogle, .adsbygoogle, [id^="div-gpt-ad"], [id^="google_ads"], '
     'iframe[src*="doubleclick"], iframe[src*="googlesyndication"], '
-    'iframe[src*="adsterra"], iframe[src*="exoclick"]';
+    'iframe[src*="adsterra"], iframe[src*="exoclick"], '
+    '.ad-container, .ads-wrapper, .ad-banner, .floating-ad, .floating-ads, .popunder, '
+    '#ad-content, #ad_banner, .ad-placement, .adbox, [class*="advertisement"], '
+    '[id*="advertisement"], [class*="-ad-"], [class*="_ad_"], [id*="-ad-"], '
+    '#disqus_thread, .comment-section, .share-box, .social-share, .fb-comments';
 
 List<ContentBlocker> buildContentBlockers() {
   final pattern =
-      '.*(${_blockedDomains.map((d) => d.replaceAll('.', r'\.')).join('|')}).*';
+      '.*(${blockedDomains.map((d) => d.replaceAll('.', r'\.')).join('|')}).*';
   return [
     ContentBlocker(
       trigger: ContentBlockerTrigger(urlFilter: pattern),

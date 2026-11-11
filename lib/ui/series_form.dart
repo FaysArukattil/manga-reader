@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/series.dart';
+import '../theme/app_colors.dart';
 
 class SeriesFormResult {
   const SeriesFormResult({
@@ -9,6 +10,7 @@ class SeriesFormResult {
     required this.chapter,
     required this.status,
     required this.openAfter,
+    this.category,
   });
 
   final String url;
@@ -16,6 +18,7 @@ class SeriesFormResult {
   final String chapter;
   final ReadStatus status;
   final bool openAfter;
+  final String? category;
 }
 
 /// Bottom sheet used both to add (optionally pre-filled from a share) and to
@@ -70,8 +73,7 @@ class _SeriesFormState extends State<SeriesForm> {
 
   String? _validateUrl(String? v) {
     final u = Uri.tryParse(_normalizeUrl(v ?? ''));
-    final ok =
-        u != null &&
+    final ok = u != null &&
         (u.scheme == 'http' || u.scheme == 'https') &&
         u.host.contains('.');
     return ok ? null : 'Enter a valid link';
@@ -86,6 +88,7 @@ class _SeriesFormState extends State<SeriesForm> {
         chapter: _chapter.text.trim(),
         status: _status,
         openAfter: open,
+        category: widget.existing?.category ?? _status.label,
       ),
     );
   }
@@ -126,9 +129,8 @@ class _SeriesFormState extends State<SeriesForm> {
                 textCapitalization: TextCapitalization.words,
                 decoration: InputDecoration(
                   labelText: 'Title',
-                  helperText: _editing
-                      ? null
-                      : 'Leave empty to detect from the page',
+                  helperText:
+                      _editing ? null : 'Leave empty to detect from the page',
                   border: const OutlineInputBorder(),
                 ),
               ),
@@ -167,8 +169,15 @@ class _SeriesFormState extends State<SeriesForm> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.black,
+                        ),
                         onPressed: () => _submit(true),
-                        child: const Text('Save & read'),
+                        child: const Text(
+                          'Save & Read',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],

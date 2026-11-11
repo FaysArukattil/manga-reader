@@ -18,20 +18,20 @@ class LibrarySnapshot {
 /// wait on that.
 class LibraryRepository {
   LibraryRepository(this.uid, {FirebaseFirestore? firestore})
-    : _col = (firestore ?? FirebaseFirestore.instance)
-          .collection('users')
-          .doc(uid)
-          .collection('series');
+      : _col = (firestore ?? FirebaseFirestore.instance)
+            .collection('users')
+            .doc(uid)
+            .collection('series');
 
   final String uid;
   final CollectionReference<Map<String, dynamic>> _col;
 
   Stream<LibrarySnapshot> watch() => _col.snapshots().map(
-    (s) => LibrarySnapshot(
-      s.docs.map((d) => Series.fromMap(d.id, d.data())).toList(),
-      fromCache: s.metadata.isFromCache,
-    ),
-  );
+        (s) => LibrarySnapshot(
+          s.docs.map((d) => Series.fromMap(d.id, d.data())).toList(),
+          fromCache: s.metadata.isFromCache,
+        ),
+      );
 
   String newId() => _col.doc().id;
 
@@ -45,6 +45,19 @@ class LibraryRepository {
   }
 
   void delete(String id) => _fire(_col.doc(id).delete());
+
+  /// Deletes every series document for this user (account deletion).
+  /// Needs a connection: batched deletes only complete once the server acks.
+  Future<void> deleteAll() async {
+    final snap = await _col.get();
+    for (var i = 0; i < snap.docs.length; i += 400) {
+      final batch = FirebaseFirestore.instance.batch();
+      for (final d in snap.docs.skip(i).take(400)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+  }
 
   void _fire(Future<void> write) {
     write.catchError((Object e) {

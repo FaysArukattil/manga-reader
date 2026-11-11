@@ -50,6 +50,10 @@ class AuthSignOutRequested extends AuthEvent {
   const AuthSignOutRequested();
 }
 
+class AuthDeleteRequested extends AuthEvent {
+  const AuthDeleteRequested();
+}
+
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   AuthBloc(this._repo) : super(const AuthState()) {
     on<_UserChanged>((e, emit) {
@@ -60,6 +64,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
     });
     on<AuthSignInRequested>(_onSignIn);
+    on<AuthDeleteRequested>(_onDelete);
     on<AuthSignOutRequested>((e, emit) async {
       await _repo.signOut();
     });
@@ -82,6 +87,24 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         state.copyWith(
           busy: false,
           error: 'Sign-in failed. Check your connection and try again.',
+        ),
+      );
+    }
+  }
+
+  Future<void> _onDelete(AuthDeleteRequested e, Emitter<AuthState> emit) async {
+    if (state.busy) return;
+    emit(state.copyWith(busy: true, clearError: true));
+    try {
+      await _repo.deleteAccount();
+      // authStateChanges moves the app to the sign-in screen.
+    } on AuthCancelled {
+      emit(state.copyWith(busy: false, error: 'Account deletion cancelled.'));
+    } catch (_) {
+      emit(
+        state.copyWith(
+          busy: false,
+          error: 'Could not delete the account. Sign out, sign in and retry.',
         ),
       );
     }

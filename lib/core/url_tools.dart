@@ -74,8 +74,7 @@ class UrlTools {
     final parts = h.split('.');
     if (parts.length <= 2) return h;
     const secondLevel = {'co', 'com', 'org', 'net', 'gov', 'ac', 'edu'};
-    final take =
-        (parts.last.length == 2 &&
+    final take = (parts.last.length == 2 &&
             secondLevel.contains(parts[parts.length - 2]))
         ? 3
         : 2;
@@ -95,10 +94,8 @@ class UrlTools {
     final m = _urlRe.firstMatch(raw);
     if (m == null) return null;
     final url = m.group(0)!;
-    final rest = raw
-        .replaceFirst(url, '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final rest =
+        raw.replaceFirst(url, '').replaceAll(RegExp(r'\s+'), ' ').trim();
     return SharedLink(url, cleanTitle(rest));
   }
 

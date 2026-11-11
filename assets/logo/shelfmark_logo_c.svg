@@ -1,0 +1,91 @@
+<svg viewBox="0 0 512 512" width="512" height="512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#1E202A"/>
+      <stop offset="60%" stop-color="#121318"/>
+      <stop offset="100%" stop-color="#090A0D"/>
+    </radialGradient>
+
+    <!-- Emerald Ribbon Gradient -->
+    <linearGradient id="ribbonGrad" x1="256" y1="90" x2="256" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00FFA3"/>
+      <stop offset="45%" stop-color="#00C875"/>
+      <stop offset="100%" stop-color="#007A3E"/>
+    </linearGradient>
+
+    <!-- Golden Straw Hat Gradient -->
+    <linearGradient id="hatGrad" x1="160" y1="60" x2="352" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFE066"/>
+      <stop offset="50%" stop-color="#FFC107"/>
+      <stop offset="100%" stop-color="#CC8400"/>
+    </linearGradient>
+
+    <!-- Crimson Hat Ribbon -->
+    <linearGradient id="crimsonGrad" x1="200" y1="95" x2="312" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF385C"/>
+      <stop offset="100%" stop-color="#B8001F"/>
+    </linearGradient>
+
+    <!-- Manga Book Gradient -->
+    <linearGradient id="bookGrad" x1="100" y1="200" x2="412" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#282B37"/>
+      <stop offset="100%" stop-color="#14151C"/>
+    </linearGradient>
+
+    <!-- Soft Glow Filter -->
+    <filter id="emeraldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Canvas (App Icon Shape) -->
+  <rect width="512" height="512" rx="115" fill="url(#bgGrad)" />
+  <rect width="512" height="512" rx="115" stroke="rgba(255, 255, 255, 0.12)" stroke-width="3" />
+
+  <!-- Speed Lines Radiating from Spine -->
+  <line x1="80" y1="140" x2="140" y2="170" stroke="rgba(255,255,255,0.2)" stroke-width="5" stroke-linecap="round"/>
+  <line x1="60" y1="230" x2="130" y2="240" stroke="rgba(255,255,255,0.25)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="70" y1="320" x2="135" y2="310" stroke="rgba(255,255,255,0.2)" stroke-width="5" stroke-linecap="round"/>
+
+  <line x1="432" y1="140" x2="372" y2="170" stroke="rgba(255,255,255,0.2)" stroke-width="5" stroke-linecap="round"/>
+  <line x1="452" y1="230" x2="382" y2="240" stroke="rgba(255,255,255,0.25)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="442" y1="320" x2="377" y2="310" stroke="rgba(255,255,255,0.2)" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- OPEN MANGA TOME BACKDROP -->
+  <!-- Left Page Stack -->
+  <path d="M 64 200 C 130 180 220 190 244 210 L 244 420 C 220 400 130 390 64 410 Z" fill="url(#bookGrad)" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+  <!-- Right Page Stack -->
+  <path d="M 448 200 C 382 180 292 190 268 210 L 268 420 C 292 400 382 390 448 410 Z" fill="url(#bookGrad)" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- Manga Comic Panels inside pages -->
+  <rect x="94" y="225" width="60" height="75" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+  <rect x="164" y="225" width="60" height="75" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+  <rect x="94" y="315" width="130" height="70" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+
+  <rect x="288" y="225" width="60" height="75" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+  <rect x="358" y="225" width="60" height="75" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+  <rect x="288" y="315" width="130" height="70" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+
+  <!-- HANGING HERO EMERALD BOOKMARK RIBBON (Prominent, Glowing, Center) -->
+  <g filter="url(#emeraldGlow)">
+    <path d="M 196 90 L 316 90 L 316 465 L 256 415 L 196 465 Z" fill="url(#ribbonGrad)" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Stylized Kanji / Slash Mark on Ribbon ("First / One" - 一) -->
+  <line x1="226" y1="230" x2="286" y2="230" stroke="#0B0C10" stroke-width="12" stroke-linecap="round"/>
+  <line x1="226" y1="290" x2="286" y2="290" stroke="#0B0C10" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="256" cy="350" r="14" fill="#0B0C10"/>
+
+  <!-- THE ICONIC ONE PIECE STRAW HAT AT THE TOP CLASP -->
+  <g>
+    <!-- Hat Crown -->
+    <path d="M 205 105 C 205 50 307 50 307 105 Z" fill="url(#hatGrad)" stroke="#805500" stroke-width="5"/>
+    <!-- Crimson Ribbon Band -->
+    <path d="M 205 102 C 235 93 277 93 307 102 L 307 114 C 277 105 235 105 205 114 Z" fill="url(#crimsonGrad)" stroke="#660010" stroke-width="2"/>
+    <!-- Wide Brim -->
+    <ellipse cx="256" cy="112" rx="110" ry="24" fill="url(#hatGrad)" stroke="#805500" stroke-width="6"/>
+  </g>
+</svg>
+
