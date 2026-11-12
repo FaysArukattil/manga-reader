@@ -1,7 +1,7 @@
 name: manga_reader
 description: A fast, modern, offline-first manga and webtoon reader.
 publish_to: 'none'
-version: 1.2.0+2
+version: 1.3.0+3
 
 environment:
   sdk: ^3.5.0
@@ -26,6 +26,7 @@ dependencies:
   provider: ^6.1.2
   audioplayers: ^6.8.1
   image_picker: ^1.2.4
+  in_app_update: ^5.0.0
 
 dev_dependencies:
   flutter_test:

@@ -14,6 +14,7 @@ import '../models/series.dart';
 import '../services/category_store.dart';
 import '../services/share_service.dart';
 import '../services/thumbnail_store.dart';
+import '../services/update_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/components/pressable_scale.dart';
 import 'components/brand_logo.dart';
@@ -47,7 +48,10 @@ class _LibraryPageState extends State<LibraryPage> {
       if (mounted) setState(() {});
     });
     _scroll.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onShare());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onShare();
+      UpdateService.instance.checkAndPromptUpdate(context);
+    });
   }
 
   @override
@@ -1373,10 +1377,21 @@ class _LibraryPageState extends State<LibraryPage> {
               ),
               const SizedBox(height: 10),
               _SheetActionTile(
+                icon: Icons.system_update_rounded,
+                iconColor: const Color(0xFF00C875),
+                title: 'Check for Updates',
+                subtitle: 'Google Play Store update & improvements',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  UpdateService.instance.checkAndPromptUpdate(context, isManual: true);
+                },
+              ),
+              const SizedBox(height: 10),
+              _SheetActionTile(
                 icon: Icons.info_outline_rounded,
                 iconColor: const Color(0xFF00C875),
                 title: 'About Manga Reader',
-                subtitle: 'Version 1.0.0 • Client viewer utility',
+                subtitle: 'Version 1.3.0 • Client viewer utility',
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _showAboutDialog();
@@ -1455,7 +1470,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Version 1.0.0 • Client Utility',
+                          'Version 1.3.0 • Client Utility',
                           style: TextStyle(
                             color: t.textSecondary,
                             fontSize: 12.5,
@@ -1501,7 +1516,27 @@ class _LibraryPageState extends State<LibraryPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.system_update_rounded, size: 16, color: Color(0xFF00C875)),
+                  label: const Text('Check for Updates on Google Play', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: t.textPrimary,
+                    side: BorderSide(color: const Color(0xFF00C875).withValues(alpha: 0.35)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(dContext);
+                    UpdateService.instance.checkAndPromptUpdate(context, isManual: true);
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
