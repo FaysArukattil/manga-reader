@@ -62,10 +62,21 @@ class ScrapeService {
     if (!forceRefresh) {
       final cached = await ScrapeCache.instance.get(url);
       if (cached != null) {
-        CfDiag.log(
-            'cache hit ${Uri.tryParse(url)?.host} pages=${cached.pages.length}');
-        await CfSession.primeAll(url, cached.pages);
-        return cached;
+        // Guard against previously corrupted or truncated scrapes (e.g. only 5 pages from the old bug)
+        final isLikelyTruncated = cached.pages.length <= 5 &&
+            (url.contains('comix.to') ||
+                url.contains('chapter') ||
+                url.contains('/read/'));
+        if (!isLikelyTruncated) {
+          CfDiag.log(
+              'cache hit ${Uri.tryParse(url)?.host} pages=${cached.pages.length}');
+          await CfSession.primeAll(url, cached.pages);
+          return cached;
+        } else {
+          CfDiag.log(
+              'evicting truncated cache entry (${cached.pages.length} pages) for $url');
+          await ScrapeCache.instance.remove(url);
+        }
       }
     }
 
@@ -294,12 +305,41 @@ class ScrapeService {
         final apiRes = await c.callAsyncJavaScript(
           functionBody: r'''
             try {
+              function extractUrls(cand) {
+                if (!cand || typeof cand !== 'object') return null;
+                var list = cand.xp || cand.iT || cand.images || cand.pages || cand.chapterPages;
+                if (Array.isArray(list) && list.length >= 2) {
+                  var urls = list.map(function(item) {
+                    if (!item) return '';
+                    if (typeof item === 'string') return item;
+                    return item.IH || item.H$ || item.url || item.src || item.imageUrl || item.link || '';
+                  }).filter(function(u) {
+                    return typeof u === 'string' && (u.indexOf('http://') === 0 || u.indexOf('https://') === 0);
+                  });
+                  if (urls.length >= 2) return urls;
+                }
+                return null;
+              }
+
+              // 0. Direct check of global query client
+              try {
+                var qc = window.queryClient || window.__REACT_QUERY_GLOBAL_CLIENT__;
+                if (qc && typeof qc.getQueryCache === 'function') {
+                  var all = qc.getQueryCache().getAll();
+                  for (var i = 0; i < all.length; i++) {
+                    var r = extractUrls(all[i].state && all[i].state.data);
+                    if (r) return r;
+                  }
+                }
+              } catch(e) {}
+
               // 1. Direct query of React Query Cache / Fiber for SPA readers (comix.to etc.)
               var els = [
                 document.querySelector('.rpage-main'),
                 document.querySelector('.rpage'),
                 document.querySelector('#app-root'),
-                document.querySelector('.rpage-page')
+                document.querySelector('.rpage-page'),
+                document.querySelector('main')
               ].filter(Boolean);
 
               for (var ei = 0; ei < els.length; ei++) {
@@ -312,7 +352,7 @@ class ScrapeService {
                     while (root && root.return) root = root.return;
                     var stack = [root];
                     var count = 0;
-                    while (stack.length > 0 && count < 2500) {
+                    while (stack.length > 0 && count < 3000) {
                       count++;
                       var f = stack.pop();
                       if (!f) continue;
@@ -321,11 +361,8 @@ class ScrapeService {
                         var state = hook.memoizedState;
                         if (state) {
                           var cand = state.data || state;
-                          if (cand && Array.isArray(cand.iT) && cand.iT.length >= 2) {
-                            return cand.iT.map(function(item) {
-                              return (item && (item.H$ || item.url || item.src)) || '';
-                            }).filter(function(u) { return typeof u === 'string' && u.startsWith('http'); });
-                          }
+                          var r = extractUrls(cand);
+                          if (r) return r;
                         }
                         hook = hook.next;
                       }
@@ -334,11 +371,8 @@ class ScrapeService {
                           var queries = f.memoizedProps.client.getQueryCache().getAll();
                           for (var qi = 0; qi < queries.length; qi++) {
                             var qd = queries[qi].state && queries[qi].state.data;
-                            if (qd && Array.isArray(qd.iT) && qd.iT.length >= 2) {
-                              return qd.iT.map(function(item) {
-                                return (item && (item.H$ || item.url || item.src)) || '';
-                              }).filter(function(u) { return typeof u === 'string' && u.startsWith('http'); });
-                            }
+                            var r = extractUrls(qd);
+                            if (r) return r;
                           }
                         }
                       }
@@ -360,13 +394,8 @@ class ScrapeService {
                   });
                   if (resp.ok) {
                     var json = await resp.json();
-                    var data = json.data || json;
-                    var list = data.iT || data.images || data.pages;
-                    if (Array.isArray(list) && list.length >= 2) {
-                      return list.map(function(item) {
-                        return (item && (item.H$ || item.url || item.src || (typeof item === 'string' ? item : null))) || '';
-                      }).filter(function(u) { return u && u.indexOf('http') === 0; });
-                    }
+                    var r = extractUrls(json.data || json);
+                    if (r) return r;
                   }
                 }
               }
@@ -466,6 +495,13 @@ class ScrapeService {
           if (pages.length >= 2) {
             currentPages = pages;
             if (pages.length > totalHint) totalHint = pages.length;
+            // When all chapter page URLs are extracted directly from reader state,
+            // we are done! No need to wait for virtualized DOM canvases to render.
+            if (totalHint > 0 && pages.length >= totalHint) {
+              CfDiag.log(
+                  'extracted all $totalHint pages directly from reader state -> done');
+              break;
+            }
           }
 
           // Snapshot whatever canvases are mounted RIGHT NOW. Virtualised
@@ -909,12 +945,11 @@ class ScrapeService {
           while (hook) {
             var s = hook.memoizedState;
             if (s && typeof s === 'object') {
+              var cand = s.data || s;
+              var list = cand.xp || cand.iT || cand.images || cand.pages;
+              if (Array.isArray(list) && list.length > 1) return list.length;
               if (typeof s.totalPage === 'number' && s.totalPage > 1) return s.totalPage;
               if (typeof s.total_page === 'number' && s.total_page > 1) return s.total_page;
-              if (s.data) {
-                if (typeof s.data.totalPage === 'number' && s.data.totalPage > 1) return s.data.totalPage;
-                if (typeof s.data.total_page === 'number' && s.data.total_page > 1) return s.data.total_page;
-              }
             }
             hook = hook.next;
           }
@@ -925,6 +960,8 @@ class ScrapeService {
               for (var qi = 0; qi < queries.length; qi++) {
                 var d = queries[qi].state && queries[qi].state.data;
                 if (!d) continue;
+                var list = d.xp || d.iT || d.images || d.pages;
+                if (Array.isArray(list) && list.length > 1) return list.length;
                 if (typeof d.totalPage === 'number' && d.totalPage > 1) return d.totalPage;
                 if (typeof d.total_page === 'number' && d.total_page > 1) return d.total_page;
               }

@@ -22,7 +22,7 @@ class ScrapeCache {
 
   /// Bump when scraping output changes, so stale entries (wrong next links,
   /// unreadable image URLs) are re-scraped instead of served from disk.
-  static const int _version = 2;
+  static const int _version = 3;
 
   final Map<String, _Entry> _mem = {};
   Directory? _dir;
