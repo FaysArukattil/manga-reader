@@ -635,12 +635,21 @@ class ScrapeService {
         // Page passed Cloudflare -> remember its cookies for image requests.
         await CfSession.primeAll(url, pages);
 
-        CfDiag.log('headless done ${uri.host} pages=${pages.length}');
+        String? resolvedTitle =
+            finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null;
+        if (resolvedTitle == null ||
+            resolvedTitle.isEmpty ||
+            RegExp(r'^\d+$').hasMatch(resolvedTitle.replaceAll(RegExp(r'\s+'), ''))) {
+          final fromUrl = UrlTools.titleFromUrl(url);
+          if (fromUrl.isNotEmpty) resolvedTitle = fromUrl;
+        }
+
+        CfDiag.log('headless done ${uri.host} pages=${pages.length} title="$resolvedTitle"');
         finish(
           ScrapedChapterResult(
             chapterUrl: url,
             pages: pages,
-            title: finalTitle != null ? UrlTools.cleanTitle(finalTitle) : null,
+            title: resolvedTitle,
             chapterLabel: UrlTools.chapterLabel(url),
             nextChapterUrl: nextChapterUrl,
             prevChapterUrl: prevChapterUrl,

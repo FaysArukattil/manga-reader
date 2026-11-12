@@ -121,18 +121,40 @@ class UrlTools {
   /// Extracts a human-friendly manga title from a URL path slug.
   /// E.g. "https://site.com/the-second-eunuch-regains-his-manhood-chapter-103/"
   /// -> "The Second Eunuch Regains His Manhood"
+  /// Also handles comix.to style: "/title/l0x7-chronicles-of-the-demon-faction/9293308-chapter-164"
+  /// where the chapter segment starts with a numeric ID.
   static String titleFromUrl(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
     if (uri == null) return '';
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segments.isEmpty) return '';
 
-    // Usually the last segment (or second to last if last is just "chapter-X") has the title
+    // Walk from the end to find a segment that looks like a title slug
+    // (contains letters, doesn't start with a bare number run).
+    // This handles comix.to: ["title", "l0x7-chronicles-of-the-demon-faction",
+    //   "9293308-chapter-164"] — last segment starts with a numeric ID, so
+    // we move up to the previous one.
+    final startsWithId = RegExp(r'^\d{4,}');
+
     String candidate = segments.last;
-    if (_chapterOnly.hasMatch(candidate) && segments.length >= 2) {
-      candidate = segments[segments.length - 2];
+
+    // If the last segment starts with a large numeric ID or is a pure chapter
+    // marker, look at earlier segments for the actual title.
+    for (int i = segments.length - 1; i >= 0; i--) {
+      final seg = segments[i];
+      final stripped = seg.replaceAll(_chapterRe, '').trim();
+      // Skip segments that become empty or pure-numeric after stripping chapter
+      if (stripped.isEmpty || RegExp(r'^\d+$').hasMatch(stripped.replaceAll(RegExp(r'[-_\s]'), ''))) {
+        continue;
+      }
+      // Skip segments that start with a large numeric run (ID prefix like "9293308-")
+      if (startsWithId.hasMatch(seg)) continue;
+      candidate = seg;
+      break;
     }
 
+    // Strip leading numeric ID prefix, e.g. "l0x7-chronicles..." → keep as-is
+    // but "9293308-chapter-164" → already skipped above.
     // Strip trailing chapter/suffix info: "-chapter-103", "-eng-li", etc.
     candidate = candidate.replaceAll(_chapterRe, '');
     final suffixPattern = RegExp(
@@ -142,6 +164,8 @@ class UrlTools {
     while (suffixPattern.hasMatch(candidate)) {
       candidate = candidate.replaceFirst(suffixPattern, '');
     }
+    // Strip any leading short alphanumeric ID prefix like "l0x7-" (comix.to hids containing digits)
+    candidate = candidate.replaceFirst(RegExp(r'^(?=[a-z0-9]*\d)[a-z0-9]{2,8}-', caseSensitive: false), '');
     candidate = candidate.replaceAll(RegExp(r'[-_]+'), ' ').trim();
     if (candidate.isEmpty) return '';
 

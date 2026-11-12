@@ -114,6 +114,10 @@ void main() {
         UrlTools.titleFromUrl('https://site.com/series/one-piece/chapter-1100'),
         equals('One Piece'),
       );
+      expect(
+        UrlTools.titleFromUrl('https://comix.to/title/l0x7-chronicles-of-the-demon-faction/9293308-chapter-164'),
+        equals('Chronicles Of The Demon Faction'),
+      );
     });
 
     test('a guessed next chapter that requires verification does NOT throw and is marked dead', () async {

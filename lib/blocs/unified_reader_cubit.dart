@@ -27,6 +27,9 @@ class UnifiedReaderState extends Equatable {
     this.nextVerificationUrl,
     this.checkingForNew = false,
     this.error,
+    this.showSettingsHint = true,
+    this.retryCount = 0,
+    this.isZoomed = false,
   });
 
   final List<ReaderPageItem> pages;
@@ -48,6 +51,15 @@ class UnifiedReaderState extends Equatable {
   final String? nextVerificationUrl;
   final bool checkingForNew;
   final String? error;
+
+  /// UI-only: whether the long-press settings hint overlay is visible.
+  final bool showSettingsHint;
+
+  /// Incremented to force a re-render of the current page image (retry on error).
+  final int retryCount;
+
+  /// Whether the reader is currently zoomed in (affects pan/swipe handling).
+  final bool isZoomed;
 
   ReaderPageItem? get currentPageItem =>
       (currentIndex >= 0 && currentIndex < pages.length)
@@ -80,6 +92,9 @@ class UnifiedReaderState extends Equatable {
     bool? checkingForNew,
     String? error,
     bool clearError = false,
+    bool? showSettingsHint,
+    int? retryCount,
+    bool? isZoomed,
   }) =>
       UnifiedReaderState(
         pages: pages ?? this.pages,
@@ -102,6 +117,9 @@ class UnifiedReaderState extends Equatable {
             : (nextVerificationUrl ?? this.nextVerificationUrl),
         checkingForNew: checkingForNew ?? this.checkingForNew,
         error: clearError ? null : (error ?? this.error),
+        showSettingsHint: showSettingsHint ?? this.showSettingsHint,
+        retryCount: retryCount ?? this.retryCount,
+        isZoomed: isZoomed ?? this.isZoomed,
       );
 
   @override
@@ -122,6 +140,9 @@ class UnifiedReaderState extends Equatable {
         nextVerificationUrl,
         checkingForNew,
         error,
+        showSettingsHint,
+        retryCount,
+        isZoomed,
       ];
 }
 
@@ -555,6 +576,21 @@ class UnifiedReaderCubit extends Cubit<UnifiedReaderState> {
   void setDim(double dim) {
     emit(state.copyWith(dim: dim));
     library?.update(series.id, {'dim': dim}, touch: false);
+  }
+
+  /// Hides the long-press settings hint overlay permanently for this session.
+  void dismissSettingsHint() {
+    if (state.showSettingsHint) emit(state.copyWith(showSettingsHint: false));
+  }
+
+  /// Forces the current page image to reload (increments retry counter).
+  void retryCurrentPage() {
+    emit(state.copyWith(retryCount: state.retryCount + 1));
+  }
+
+  /// Tracks whether the reader is zoomed in; affects swipe/pan behaviour.
+  void setZoomed({required bool zoomed}) {
+    if (state.isZoomed != zoomed) emit(state.copyWith(isZoomed: zoomed));
   }
 
   @override

@@ -95,7 +95,6 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
   PageController? _pageController;
   final PhysicsPageTurnController _turnController = PhysicsPageTurnController();
   bool _leaving = false;
-  bool _showSettingsHint = true;
   Timer? _hintTimer;
 
   @override
@@ -114,7 +113,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     _hintTimer = Timer(const Duration(milliseconds: 2500), () {
-      if (mounted) setState(() => _showSettingsHint = false);
+      _cubit.dismissSettingsHint();
     });
   }
 
@@ -182,9 +181,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
 
   void _showHiddenSettings() {
     _hintTimer?.cancel();
-    if (_showSettingsHint && mounted) {
-      setState(() => _showSettingsHint = false);
-    }
+    _cubit.dismissSettingsHint();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -637,7 +634,7 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                   ),
 
                   // Floating press-and-hold tutorial banner (translucent, subtle, non-intrusive)
-                  if (_showSettingsHint)
+                  if (state.showSettingsHint)
                     Positioned(
                       top: MediaQuery.paddingOf(context).top + 12,
                       left: 20,
@@ -645,11 +642,11 @@ class _UnifiedReaderPageState extends State<UnifiedReaderPage>
                       child: Center(
                         child: GestureDetector(
                           onTap: () {
-                            setState(() => _showSettingsHint = false);
+                            _cubit.dismissSettingsHint();
                             _showHiddenSettings();
                           },
                           child: AnimatedOpacity(
-                            opacity: _showSettingsHint ? 1.0 : 0.0,
+                            opacity: state.showSettingsHint ? 1.0 : 0.0,
                             duration: const Duration(milliseconds: 350),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(20),
@@ -894,16 +891,26 @@ class _StreamPagerState extends State<_StreamPager> {
     if (!_verticalScrollController.hasClients || widget.pages.isEmpty) return;
     final pos = _verticalScrollController.position;
     final max = pos.maxScrollExtent;
+    int? targetPage;
     if (max > 0) {
       final frac = (pos.pixels / max).clamp(0.0, 1.0);
       final page = (frac * (widget.pages.length - 1)).round();
       if (page != _lastSoundPage) {
         _lastSoundPage = page;
-        widget.onPageChanged(page);
+        targetPage = page;
       }
     }
     if (pos.pixels >= max - 300) {
-      widget.onPageChanged(widget.pages.length - 1);
+      final last = widget.pages.length - 1;
+      if (_lastSoundPage != last) {
+        _lastSoundPage = last;
+        targetPage = last;
+      }
+    }
+    if (targetPage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onPageChanged(targetPage!);
+      });
     }
   }
 
@@ -1196,12 +1203,7 @@ class _PageImageState extends State<_PageImage> {
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
     _transformController.addListener(_onTransform);
-  }
-
-  void _onScroll() {
-    if (mounted) setState(() {});
   }
 
   void _onTransform() {
@@ -1214,7 +1216,6 @@ class _PageImageState extends State<_PageImage> {
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
     _transformController.removeListener(_onTransform);
     _scrollController.dispose();
     _transformController.dispose();
@@ -1229,15 +1230,6 @@ class _PageImageState extends State<_PageImage> {
       height: double.infinity,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final hasScroll = _scrollController.hasClients &&
-              _scrollController.position.haveDimensions &&
-              _scrollController.position.maxScrollExtent > 40;
-          final atBottom = !hasScroll ||
-              (_scrollController.hasClients &&
-                  _scrollController.offset >=
-                      _scrollController.position.maxScrollExtent - 25);
-          final showHint = hasScroll && !atBottom;
-
           return Stack(
             children: [
               // Scrollable content (single image or multiple seamless slices)
@@ -1258,9 +1250,16 @@ class _PageImageState extends State<_PageImage> {
                             .inMilliseconds);
                     final vy = (dy / dt) * 1000.0;
 
+                    final hasScroll = _scrollController.hasClients &&
+                        _scrollController.position.haveDimensions &&
+                        _scrollController.position.maxScrollExtent > 40;
                     final atTop = !hasScroll ||
                         (_scrollController.hasClients &&
                             _scrollController.offset <= 20);
+                    final atBottom = !hasScroll ||
+                        (_scrollController.hasClients &&
+                            _scrollController.offset >=
+                                _scrollController.position.maxScrollExtent - 25);
 
                     if ((dy < -40 || vy < -200) && atBottom) {
                       widget.onNextPage?.call();
@@ -1408,129 +1407,147 @@ class _PageImageState extends State<_PageImage> {
                 ),
               ),
 
-              // Right-side scrollbar rail indicating content below
-              if (hasScroll)
-                Positioned(
-                  right: 4,
-                  top: 50,
-                  bottom: 50,
-                  child: LayoutBuilder(
-                    builder: (context, railConstraints) {
-                      final trackHeight = railConstraints.maxHeight;
-                      final maxExtent =
-                          _scrollController.position.maxScrollExtent;
-                      final offset =
-                          _scrollController.offset.clamp(0.0, maxExtent);
-                      final viewport =
-                          _scrollController.position.viewportDimension;
-                      final totalHeight = maxExtent + viewport;
+              // Right-side scrollbar rail & bottom hint (driven by AnimatedBuilder to eliminate setState)
+              AnimatedBuilder(
+                animation: _scrollController,
+                builder: (context, _) {
+                  final hasScroll = _scrollController.hasClients &&
+                      _scrollController.position.haveDimensions &&
+                      _scrollController.position.maxScrollExtent > 40;
+                  final atBottom = !hasScroll ||
+                      (_scrollController.hasClients &&
+                          _scrollController.offset >=
+                              _scrollController.position.maxScrollExtent - 25);
+                  final showHint = hasScroll && !atBottom;
 
-                      final thumbHeight = (viewport / totalHeight * trackHeight)
-                          .clamp(28.0, trackHeight);
-                      final thumbTop = maxExtent > 0
-                          ? (offset / maxExtent) * (trackHeight - thumbHeight)
-                          : 0.0;
+                  return Stack(
+                    children: [
+                      if (hasScroll)
+                        Positioned(
+                          right: 4,
+                          top: 50,
+                          bottom: 50,
+                          child: LayoutBuilder(
+                            builder: (context, railConstraints) {
+                              final trackHeight = railConstraints.maxHeight;
+                              final maxExtent =
+                                  _scrollController.position.maxScrollExtent;
+                              final offset =
+                                  _scrollController.offset.clamp(0.0, maxExtent);
+                              final viewport =
+                                  _scrollController.position.viewportDimension;
+                              final totalHeight = maxExtent + viewport;
 
-                      return IgnorePointer(
-                        child: Container(
-                          width: 3.5,
-                          height: trackHeight,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: Stack(
-                            children: [
-                              Positioned(
-                                top: thumbTop,
-                                left: 0,
-                                right: 0,
-                                height: thumbHeight,
+                              final thumbHeight = (viewport / totalHeight * trackHeight)
+                                  .clamp(28.0, trackHeight);
+                              final thumbTop = maxExtent > 0
+                                  ? (offset / maxExtent) * (trackHeight - thumbHeight)
+                                  : 0.0;
+
+                              return IgnorePointer(
                                 child: Container(
+                                  width: 3.5,
+                                  height: trackHeight,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF00B96B),
+                                    color: Colors.white.withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(3),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(0xFF00B96B)
-                                            .withValues(alpha: 0.7),
-                                        blurRadius: 4,
-                                        spreadRadius: 0.5,
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      Positioned(
+                                        top: thumbTop,
+                                        left: 0,
+                                        right: 0,
+                                        height: thumbHeight,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF00B96B),
+                                            borderRadius: BorderRadius.circular(3),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(0xFF00B96B)
+                                                    .withValues(alpha: 0.7),
+                                                blurRadius: 4,
+                                                spreadRadius: 0.5,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
 
-              // Floating bottom pill hint: "Scroll down for more ↓" (glass-like translucent)
-              Positioned(
-                bottom: 20,
-                left: 0,
-                right: 0,
-                child: IgnorePointer(
-                  ignoring: !showHint,
-                  child: AnimatedOpacity(
-                    opacity: showHint ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 250),
-                    child: Center(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: BackdropFilter(
-                          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 5.5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.28),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.14),
-                                width: 0.6,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.15),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.keyboard_arrow_down_rounded,
-                                  size: 15,
-                                  color: const Color(0xFF00B96B)
-                                      .withValues(alpha: 0.85),
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Scroll down for more',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.8),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                    letterSpacing: 0.2,
+                      // Floating bottom pill hint: "Scroll down for more ↓" (glass-like translucent)
+                      Positioned(
+                        bottom: 20,
+                        left: 0,
+                        right: 0,
+                        child: IgnorePointer(
+                          ignoring: !showHint,
+                          child: AnimatedOpacity(
+                            opacity: showHint ? 1.0 : 0.0,
+                            duration: const Duration(milliseconds: 250),
+                            child: Center(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: BackdropFilter(
+                                  filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 5.5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.28),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.14),
+                                        width: 0.6,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.15),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          size: 15,
+                                          color: const Color(0xFF00B96B)
+                                              .withValues(alpha: 0.85),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Scroll down for more',
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(alpha: 0.8),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            letterSpacing: 0.2,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ),
+                    ],
+                  );
+                },
               ),
             ],
           );
