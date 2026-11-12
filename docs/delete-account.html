@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account &amp; Data Deletion - Manga Reader</title>
+  <meta name="description" content="Official Account and Data Deletion policy for Manga Reader. Instructions for permanently purging account records and cloud data from Google Firebase.">
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #00C875;
+      --primary-dark: #00A35C;
+      --primary-light: #34E59A;
+      --accent: #6366F1;
+      --danger: #FF4D4F;
+      --danger-light: #FFA39E;
+      --bg: #07080A;
+      --frame-bg: #0D0E11;
+      --surface: #16171C;
+      --surface-elevated: #1F2027;
+      --text: #F5F6F8;
+      --text-muted: #A0A4B2;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(0, 200, 117, 0.3);
+      --border-danger: rgba(255, 77, 79, 0.35);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      padding: 24px 20px;
+    }
+    a { color: var(--primary-light); text-decoration: none; transition: all 0.2s; }
+    a:hover { color: var(--primary); }
+
+    .window-frame {
+      max-width: 1360px;
+      margin: 0 auto;
+      background: var(--frame-bg);
+      border-radius: 36px;
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 32px 100px -10px rgba(0, 0, 0, 0.8), 0 0 60px rgba(0, 200, 117, 0.15);
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .hero-viewport {
+      position: relative;
+      background: radial-gradient(circle at 50% -20%, #153326 0%, #0D1E18 35%, #0B1414 70%, #08090C 100%);
+      padding: 32px 36px 64px;
+      text-align: center;
+      overflow: hidden;
+    }
+    .hero-viewport::before {
+      content: '';
+      position: absolute;
+      top: -120px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 850px;
+      height: 480px;
+      background: radial-gradient(circle, rgba(0, 200, 117, 0.22) 0%, rgba(99, 102, 241, 0.1) 50%, transparent 75%);
+      filter: blur(90px);
+      pointer-events: none;
+    }
+
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 48px;
+      position: relative;
+      z-index: 30;
+      gap: 16px;
+    }
+    .nav-top-row { display: contents; }
+    .brand {
+      order: 1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      color: #FFFFFF;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .brand img {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0, 200, 117, 0.35);
+    }
+    .nav-pill-center {
+      order: 2;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      padding: 6px 8px;
+      border-radius: 999px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+    .nav-pill-center a {
+      padding: 7px 18px;
+      border-radius: 999px;
+      font-size: 13.5px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.78);
+      text-decoration: none;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .nav-pill-center a:hover, .nav-pill-center a.active {
+      background: rgba(255, 255, 255, 0.18);
+      color: #FFFFFF;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    .nav-btn-right {
+      order: 3;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 20px;
+      background: #FFFFFF;
+      color: #051811;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 13.5px;
+      text-decoration: none;
+      transition: all 0.25s ease;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      flex-shrink: 0;
+    }
+    .nav-btn-right:hover {
+      background: var(--primary-light);
+      color: #051811;
+      transform: translateY(-2px);
+    }
+
+    .page-hero {
+      position: relative;
+      z-index: 20;
+      max-width: 820px;
+      margin: 0 auto;
+    }
+    .page-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 77, 79, 0.12);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border-danger);
+      color: #FFA39E;
+      padding: 5px 16px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 800;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+    .page-tag span.dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+    }
+    .page-title {
+      font-size: clamp(30px, 4.2vw, 46px);
+      font-weight: 900;
+      letter-spacing: -1.2px;
+      color: #FFFFFF;
+      margin-bottom: 14px;
+    }
+    .page-subtitle {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.8);
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .page-meta {
+      font-size: 13px;
+      color: var(--primary-light);
+      font-weight: 600;
+    }
+
+    .content-sheet {
+      background: #08090C;
+      border-radius: 40px 40px 0 0;
+      padding: 60px 48px 80px;
+      position: relative;
+      z-index: 10;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 -20px 50px rgba(0, 0, 0, 0.5);
+    }
+    .doc-container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .doc-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 44px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+    }
+    .danger-card {
+      background: rgba(255, 77, 79, 0.08);
+      border: 1px solid var(--border-danger);
+      border-radius: 18px;
+      padding: 24px;
+      margin: 24px 0;
+    }
+    .danger-card h4 {
+      color: #FFA39E;
+      font-size: 17px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .action-box {
+      background: rgba(0, 200, 117, 0.06);
+      border: 1px solid var(--border-accent);
+      border-radius: 18px;
+      padding: 24px;
+      margin: 24px 0;
+    }
+    .action-box h4 {
+      color: var(--primary-light);
+      font-size: 17px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .btn-delete-request {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--danger);
+      color: #FFFFFF;
+      padding: 12px 24px;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 14.5px;
+      margin-top: 14px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-delete-request:hover {
+      background: #FF7875;
+      color: #FFFFFF;
+      transform: translateY(-2px);
+    }
+    h2 {
+      font-size: 21px;
+      font-weight: 800;
+      color: #FFFFFF;
+      margin-top: 38px;
+      margin-bottom: 16px;
+      border-left: 3px solid var(--primary);
+      padding-left: 14px;
+      letter-spacing: -0.4px;
+    }
+    h3 {
+      font-size: 17px;
+      font-weight: 700;
+      color: #E2E8F0;
+      margin-top: 24px;
+      margin-bottom: 10px;
+    }
+    p {
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      font-size: 15px;
+    }
+    ul, ol {
+      color: var(--text-muted);
+      padding-left: 24px;
+      margin-bottom: 20px;
+    }
+    li {
+      margin-bottom: 10px;
+      font-size: 14.5px;
+    }
+    li strong {
+      color: #FFFFFF;
+    }
+
+    footer {
+      background: #060709;
+      border-top: 1px solid var(--border);
+      padding: 32px 36px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .footer-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .footer-links {
+      display: flex;
+      gap: 20px;
+    }
+    .footer-links a {
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .footer-links a:hover {
+      color: #FFFFFF;
+    }
+
+    @media (max-width: 820px) {
+      body { padding: 12px 10px; }
+      .window-frame { border-radius: 24px; }
+      .hero-viewport { padding: 24px 20px 48px; }
+      .navbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 16px;
+        margin-bottom: 32px;
+      }
+      .nav-top-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+      }
+      .nav-pill-center {
+        order: 2;
+        width: 100%;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding: 4px 6px;
+        scrollbar-width: none;
+      }
+      .nav-pill-center::-webkit-scrollbar { display: none; }
+      .nav-pill-center a {
+        padding: 6px 14px;
+        font-size: 12.5px;
+        flex-shrink: 0;
+      }
+      .content-sheet { padding: 40px 18px 50px; border-radius: 28px 28px 0 0; }
+      .doc-box { padding: 24px 18px; }
+      .footer-container { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="window-frame">
+
+    <header class="hero-viewport">
+      <nav class="navbar">
+        <div class="nav-top-row">
+          <a href="index.html" class="brand">
+            <img src="assets/icon.png" alt="Manga Reader Icon">
+            <span>MANGA READER.</span>
+          </a>
+
+          <a href="index.html" class="nav-btn-right">
+            <span>Home</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </a>
+        </div>
+
+        <div class="nav-pill-center">
+          <a href="index.html">Home</a>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Service</a>
+          <a href="delete-account.html" class="active">Delete Account</a>
+        </div>
+      </nav>
+
+      <div class="page-hero">
+        <div class="page-tag">
+          <span class="dot"></span>
+          <span>Google Play Data Safety</span>
+        </div>
+        <h1 class="page-title">Account &amp; Data Deletion</h1>
+        <p class="page-subtitle">
+          Learn what data is deleted, how to request permanent removal, and how your information is purged from Google Firebase.
+        </p>
+        <div class="page-meta">Last Updated: November 12, 2026</div>
+      </div>
+    </header>
+
+    <main class="content-sheet">
+      <div class="doc-container">
+        <div class="doc-box">
+
+          <p>
+            At <strong>Manga Reader</strong>, developed by <strong>Fays Arukattil</strong>, we believe you should have complete ownership and control over your personal data. This document provides clear, step-by-step instructions on how to request the permanent deletion of your account and all associated cloud data.
+          </p>
+
+          <div class="danger-card">
+            <h4>Permanent Action Warning</h4>
+            <p style="color: #FFCCC7; margin: 0; font-size: 14px;">
+              Deleting your account is permanent. All your synchronized reading history, bookmarks, custom categories, and saved series records in Google Cloud Firestore will be irrecoverably wiped.
+            </p>
+          </div>
+
+          <h2>1. Data That Will Be Deleted</h2>
+          <p>Upon receiving and verifying your deletion request, we permanently expunge:</p>
+          <ul>
+            <li><strong>Firebase Authentication Record:</strong> Your Google User Identifier (UID), email address, and display name stored in Google Firebase Authentication.</li>
+            <li><strong>Cloud Firestore Library Documents:</strong> All bookmarks, chapter progress, scroll depth records, and custom categories linked to your account.</li>
+            <li><strong>Cached Cloud Metadata:</strong> Any temporary session or synchronization tokens.</li>
+          </ul>
+
+          <h2>2. Data That Is Retained</h2>
+          <p>
+            <strong>Zero Data Retained:</strong> We do not retain any personal or reading data after the deletion request is processed. We do not maintain off-site marketing databases or share data with data brokers.
+          </p>
+
+          <h2>3. How to Request Account Deletion</h2>
+          <p>You can request account deletion through either of the following methods:</p>
+
+          <div class="action-box">
+            <h4>Method 1: Direct Email Request (Fastest)</h4>
+            <p>
+              Send an email from the Google account you used to sign into Manga Reader with the subject <code>Manga Reader Account Deletion Request</code>.
+            </p>
+            <a href="mailto:faysarukattil@gmail.com?subject=Manga%20Reader%20Account%20Deletion%20Request&body=Please%20permanently%20delete%20my%20Manga%20Reader%20account%20and%20all%20associated%20cloud%20data." class="btn-delete-request">
+              <span>Send Deletion Request Email</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </a>
+          </div>
+
+          <div class="action-box">
+            <h4>Method 2: In-App Local Wipe &amp; Sign-Out</h4>
+            <ol>
+              <li>Open <strong>Manga Reader</strong> on your device.</li>
+              <li>Tap your profile avatar in the top bar to open the <strong>Profile Sheet</strong>.</li>
+              <li>Tap <strong>Sign Out</strong> to unlink your Google account from the physical device.</li>
+              <li>Go to your phone's <strong>Settings &gt; Apps &gt; Manga Reader &gt; Storage &gt; Clear Storage / Cache</strong> to wipe all locally cached comic chapters.</li>
+            </ol>
+          </div>
+
+          <h2>4. Deletion Processing Timeline</h2>
+          <p>
+            Email requests are verified and processed within <strong>7 business days</strong> (and no later than 30 days). Once the deletion is completed, you will receive a confirmation email.
+          </p>
+
+          <h2>5. Contact Information</h2>
+          <p>
+            If you have any questions regarding your data privacy or account deletion:
+            <br><br>
+            <strong>Fays Arukattil</strong><br>
+            Developer of Manga Reader<br>
+            Email: <a href="mailto:faysarukattil@gmail.com">faysarukattil@gmail.com</a>
+          </p>
+
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <div class="footer-container">
+        <div class="copyright">
+          &copy; 2026 Manga Reader. Developed by Fays Arukattil. All rights reserved.
+        </div>
+        <div class="footer-links">
+          <a href="index.html">Home</a>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Service</a>
+          <a href="delete-account.html">Delete Account</a>
+          <a href="mailto:faysarukattil@gmail.com">Contact</a>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+</body>
+</html>
