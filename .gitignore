@@ -46,3 +46,12 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Keystore & Signing credentials (NEVER commit to version control)
+key.properties
+**/key.properties
+*.jks
+*.keystore
+**/*.jks
+**/*.keystore
+upload-keystore.jks

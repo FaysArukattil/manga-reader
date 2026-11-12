@@ -1,4 +1,4 @@
-package com.faysarukattil.shelfmark
+package com.faysarukattil.mangareader
 
 import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
@@ -6,7 +6,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Receives "Share -> Shelfmark" text (a URL, optionally with a title) and hands
+ * Receives "Share -> Manga Reader" text (a URL, optionally with a title) and hands
  * it to Dart over a small MethodChannel. No third-party plugin needed.
  */
 class MainActivity : FlutterActivity() {
@@ -46,3 +46,4 @@ class MainActivity : FlutterActivity() {
         return if (subject.isNullOrBlank()) text else "$subject\n$text"
     }
 }
+

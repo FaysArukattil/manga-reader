@@ -7,17 +7,17 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:356770181005:android:c08cbd706520bfd6e597c4",
+        "mobilesdk_app_id": "1:356770181005:android:3cc25a39bdb82ed1e597c4",
         "android_client_info": {
-          "package_name": "com.faysarukattil.shelfmark"
+          "package_name": "com.faysarukattil.mangareader"
         }
       },
       "oauth_client": [
         {
-          "client_id": "356770181005-nkf2e1vugskhoehlbfv5hscm932o549p.apps.googleusercontent.com",
+          "client_id": "356770181005-2kn5ekdskr76mvsjvlt5soad3crn9kel.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.faysarukattil.shelfmark",
+            "package_name": "com.faysarukattil.mangareader",
             "certificate_hash": "0273aee0664692990a741ee6351ebf82b80be6b1"
           }
         },
@@ -45,4 +45,3 @@
   ],
   "configuration_version": "1"
 }
-
