@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../data/auth_repository.dart';
@@ -87,13 +88,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(state.copyWith(busy: false));
     } on AuthCancelled {
       emit(state.copyWith(busy: false));
-    } catch (_) {
-      emit(
-        state.copyWith(
-          busy: false,
-          error: 'Sign-in failed. Check your connection and try again.',
-        ),
-      );
+    } catch (e, st) {
+      debugPrint('Auth error: $e\n$st');
+      String msg = 'Sign-in failed. Check your connection and try again.';
+      final str = e.toString();
+      if (e is FirebaseAuthException) {
+        msg = e.message ?? 'Authentication failed (${e.code}).';
+      } else if (str.contains('10:') || str.contains('ApiException: 10')) {
+        msg = 'Sign-in setup error: Keystore SHA-1 not registered in Firebase (ApiException 10).';
+      } else if (str.contains('12500:') || str.contains('ApiException: 12500')) {
+        msg = 'Sign-in failed: Google Play Services configuration error (12500).';
+      } else if (str.contains('network_error')) {
+        msg = 'Sign-in failed. Check your internet connection.';
+      }
+      emit(state.copyWith(busy: false, error: msg));
     }
   }
 

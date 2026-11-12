@@ -1,7 +1,7 @@
 name: manga_reader
 description: A fast, modern, offline-first manga and webtoon reader.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.2.0+2
 
 environment:
   sdk: ^3.5.0
