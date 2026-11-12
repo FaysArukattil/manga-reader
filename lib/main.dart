@@ -40,6 +40,6 @@ Future<void> main() async {
   await share.init();
 
   runApp(
-    ShelfmarkApp(thumbs: thumbs, share: share, chapterStore: chapterStore),
+    MangaReaderApp(thumbs: thumbs, share: share, chapterStore: chapterStore),
   );
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../blocs/auth_bloc.dart';
 import '../blocs/library_bloc.dart';
@@ -1107,7 +1108,7 @@ class _LibraryPageState extends State<LibraryPage> {
     final displayName = user?.displayName?.trim();
     final welcomeTitle = displayName != null && displayName.isNotEmpty
         ? 'Welcome,\n$displayName!'
-        : 'Welcome\nto Shelfmark!';
+        : 'Welcome\nto Manga Reader!';
 
     return Container(
       width: double.infinity,
@@ -1297,7 +1298,7 @@ class _LibraryPageState extends State<LibraryPage> {
               ),
               const SizedBox(height: 2),
               Text(
-                user?.email ?? 'Guest Profile (Local Storage)',
+                user?.email ?? 'Google Account',
                 style: TextStyle(color: t.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 18),
@@ -1348,16 +1349,209 @@ class _LibraryPageState extends State<LibraryPage> {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
+              _SheetActionTile(
+                icon: Icons.shield_outlined,
+                iconColor: t.accent,
+                title: 'Privacy Policy',
+                subtitle: 'Zero data selling, on-device local storage',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _openWebUrl('https://faysarukattil.github.io/manga-reader/privacy.html');
+                },
+              ),
+              const SizedBox(height: 10),
+              _SheetActionTile(
+                icon: Icons.gavel_rounded,
+                iconColor: const Color(0xFF6366F1),
+                title: 'Terms of Service',
+                subtitle: 'Legal disclaimers & copyright compliance terms',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _openWebUrl('https://faysarukattil.github.io/manga-reader/terms.html');
+                },
+              ),
+              const SizedBox(height: 10),
+              _SheetActionTile(
+                icon: Icons.info_outline_rounded,
+                iconColor: const Color(0xFF00C875),
+                title: 'About Manga Reader',
+                subtitle: 'Version 1.0.0 • Client viewer utility',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showAboutDialog();
+                },
+              ),
+              const SizedBox(height: 10),
               _SheetActionTile(
                 icon: Icons.logout_rounded,
-                iconColor: t.textPrimary,
+                iconColor: Colors.redAccent,
                 title: 'Sign Out',
-                subtitle: 'Switch accounts or read offline',
+                subtitle: 'Sign out or switch Google account',
                 onTap: () {
                   Navigator.pop(sheetContext);
                   context.read<AuthBloc>().add(const AuthSignOutRequested());
                 },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openWebUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri != null) {
+      try {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        _snack('Could not open link');
+      }
+    }
+  }
+
+  void _showAboutDialog() {
+    final t = context.tokens;
+    showDialog<void>(
+      context: context,
+      builder: (dContext) => Dialog(
+        backgroundColor: t.surfaceCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: t.border),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: t.accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(Icons.menu_book_rounded, color: t.accent, size: 26),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Manga Reader',
+                          style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Version 1.0.0 • Client Utility',
+                          style: TextStyle(
+                            color: t.textSecondary,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Manga Reader is a private, client-side browser and viewer utility intended exclusively for use on free websites, public domain works, and authorized media without copyright restrictions. It does not host, archive, or distribute any digital files. All requests occur on-device by direct user navigation.',
+                style: TextStyle(
+                  color: t.textSecondary,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: t.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: t.border),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.gavel_rounded, color: t.textTertiary, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Sole legal and financial responsibility rests entirely with the user. The developer assumes zero liability.',
+                        style: TextStyle(
+                          color: t.textTertiary,
+                          fontSize: 11.5,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: t.textPrimary,
+                        side: BorderSide(color: t.border),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      onPressed: () {
+                        _openWebUrl('https://faysarukattil.github.io/manga-reader/privacy.html');
+                      },
+                      child: const Text('Privacy', style: TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: t.textPrimary,
+                        side: BorderSide(color: t.border),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      onPressed: () {
+                        _openWebUrl('https://faysarukattil.github.io/manga-reader/terms.html');
+                      },
+                      child: const Text('Terms', style: TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                    ),
+                    onPressed: () => Navigator.pop(dContext),
+                    child: const Text('Close', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ),
             ],
           ),
@@ -2547,7 +2741,7 @@ class _EmptyState extends StatelessWidget {
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 320),
             child: Text(
-              'Paste a link to any manga or webtoon chapter. Shelfmark removes every ad and bookmarks your reading progress automatically.',
+              'Paste a link to any manga or webtoon chapter. Manga Reader removes every ad and bookmarks your reading progress automatically.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: t.textSecondary,

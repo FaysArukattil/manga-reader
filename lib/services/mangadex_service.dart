@@ -79,7 +79,7 @@ class MangaDexService {
 
   static const _host = 'api.mangadex.org';
   static const _headers = {
-    'User-Agent': 'Shelfmark/1.0 (personal non-commercial reader)',
+    'User-Agent': 'MangaReader/1.0 (personal non-commercial reader)',
     'Accept': 'application/json',
   };
   static const _ratings = ['safe', 'suggestive'];

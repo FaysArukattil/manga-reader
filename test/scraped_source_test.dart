@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shelfmark/core/url_tools.dart';
-import 'package:shelfmark/services/reader/chapter_source.dart';
-import 'package:shelfmark/services/scrape/scrape_service.dart';
-import 'package:shelfmark/services/scrape/site_adapter.dart';
+import 'package:manga_reader/core/url_tools.dart';
+import 'package:manga_reader/services/reader/chapter_source.dart';
+import 'package:manga_reader/services/scrape/scrape_service.dart';
+import 'package:manga_reader/services/scrape/site_adapter.dart';
 
 typedef _Handler = ScrapedChapterResult Function(String url, bool force);
 

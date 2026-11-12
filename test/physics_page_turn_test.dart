@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shelfmark/ui/components/physics_page_turn.dart';
+import 'package:manga_reader/ui/components/physics_page_turn.dart';
 
 void main() {
   group('PhysicsPageTurn', () {

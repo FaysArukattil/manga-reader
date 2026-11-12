@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/dom.dart' as dom;
-import 'package:shelfmark/services/scrape/cf_session.dart';
-import 'package:shelfmark/services/scrape/generic_site_adapter.dart';
+import 'package:manga_reader/services/scrape/cf_session.dart';
+import 'package:manga_reader/services/scrape/generic_site_adapter.dart';
 
 void main() {
   group('GenericSiteAdapter', () {

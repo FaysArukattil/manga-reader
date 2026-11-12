@@ -907,7 +907,7 @@ class _UnfoldingBookPainter extends CustomPainter {
 
     final tp = TextPainter(
       text: const TextSpan(
-        text: 'SHELFMARK',
+        text: 'MANGA READER',
         style: TextStyle(
           color: _kMint,
           fontSize: 8.5,

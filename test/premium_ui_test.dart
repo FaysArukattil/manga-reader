@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shelfmark/models/series.dart';
-import 'package:shelfmark/ui/components/reading_loader.dart';
-import 'package:shelfmark/ui/onboarding_page.dart';
+import 'package:manga_reader/models/series.dart';
+import 'package:manga_reader/ui/components/reading_loader.dart';
+import 'package:manga_reader/ui/onboarding_page.dart';
 
 void main() {
   testWidgets('ReadingLoader displays multi-stage progress and series info',

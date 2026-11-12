@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shelfmark/blocs/unified_reader_cubit.dart';
-import 'package:shelfmark/models/series.dart';
-import 'package:shelfmark/services/page_cache.dart';
-import 'package:shelfmark/services/reader/chapter_source.dart';
-import 'package:shelfmark/services/scrape/site_adapter.dart';
+import 'package:manga_reader/blocs/unified_reader_cubit.dart';
+import 'package:manga_reader/models/series.dart';
+import 'package:manga_reader/services/page_cache.dart';
+import 'package:manga_reader/services/reader/chapter_source.dart';
+import 'package:manga_reader/services/scrape/site_adapter.dart';
 
 class FakeChapterSource implements ChapterSource {
   FakeChapterSource({

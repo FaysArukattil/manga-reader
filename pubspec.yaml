@@ -1,5 +1,5 @@
-name: shelfmark
-description: Track and resume manga across every site you read on.
+name: manga_reader
+description: A fast, modern, offline-first manga and webtoon reader.
 publish_to: 'none'
 version: 1.0.0+1
 

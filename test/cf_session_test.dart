@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shelfmark/services/scrape/cf_session.dart';
+import 'package:manga_reader/services/scrape/cf_session.dart';
 
 void main() {
   group('CfSession.looksLikeChallengeHtml', () {

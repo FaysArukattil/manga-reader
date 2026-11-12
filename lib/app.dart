@@ -17,8 +17,8 @@ import 'ui/library_page.dart';
 import 'ui/login_page.dart';
 import 'ui/splash_page.dart';
 
-class ShelfmarkApp extends StatelessWidget {
-  const ShelfmarkApp({
+class MangaReaderApp extends StatelessWidget {
+  const MangaReaderApp({
     super.key,
     required this.thumbs,
     required this.share,

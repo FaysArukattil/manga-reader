@@ -1,5 +1,7 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../blocs/auth_bloc.dart';
 import '../theme/components/pressable_scale.dart';
@@ -95,13 +97,13 @@ class _Content extends StatelessWidget {
         child:
             Transform.translate(offset: Offset(0, (1 - v) * 16), child: child),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Spacer(),
-          BrandLogo(size: 60, withGlow: false),
-          SizedBox(height: 28),
-          Text(
+          const Spacer(),
+          const BrandLogo(size: 60, withGlow: false),
+          const SizedBox(height: 28),
+          const Text(
             'Pick up where\nyou left off.',
             style: TextStyle(
               fontSize: 36,
@@ -111,8 +113,8 @@ class _Content extends StatelessWidget {
               color: Colors.white,
             ),
           ),
-          SizedBox(height: 14),
-          Text(
+          const SizedBox(height: 14),
+          const Text(
             'Sign in to keep your library and reading progress on every device. New here? Your account is created automatically.',
             style: TextStyle(
               fontSize: 15,
@@ -120,19 +122,57 @@ class _Content extends StatelessWidget {
               color: Colors.white54,
             ),
           ),
-          Spacer(),
-          SizedBox(height: 32),
-          _GoogleButton(),
-          SizedBox(height: 18),
+          const Spacer(),
+          const SizedBox(height: 32),
+          const _GoogleButton(),
+          const SizedBox(height: 18),
           Center(
-            child: Text(
-              'By continuing, you agree to our Terms and Privacy Policy.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: Colors.white30,
-                height: 1.4,
+            child: Text.rich(
+              TextSpan(
+                text: 'By continuing, you agree to our ',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: Colors.white38,
+                  height: 1.45,
+                ),
+                children: [
+                  TextSpan(
+                    text: 'Terms of Service',
+                    style: const TextStyle(
+                      color: _kMint,
+                      decoration: TextDecoration.underline,
+                    ),
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () {
+                        launchUrl(
+                          Uri.parse(
+                            'https://faysarukattil.github.io/manga-reader/terms.html',
+                          ),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                  ),
+                  const TextSpan(text: ' and '),
+                  TextSpan(
+                    text: 'Privacy Policy',
+                    style: const TextStyle(
+                      color: _kMint,
+                      decoration: TextDecoration.underline,
+                    ),
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () {
+                        launchUrl(
+                          Uri.parse(
+                            'https://faysarukattil.github.io/manga-reader/privacy.html',
+                          ),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                  ),
+                  const TextSpan(text: '.'),
+                ],
               ),
+              textAlign: TextAlign.center,
             ),
           ),
         ],

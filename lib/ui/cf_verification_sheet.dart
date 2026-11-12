@@ -328,7 +328,7 @@ class _CfVerificationSheetState extends State<CfVerificationSheet> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Tap "Verify you are human" below. Shelfmark will automatically load the chapter once verified.',
+                      'Tap "Verify you are human" below. Manga Reader will automatically load the chapter once verified.',
                       style: TextStyle(color: Colors.white70, fontSize: 11.5),
                     ),
                   ),
