@@ -1133,7 +1133,7 @@ class _StreamPagerState extends State<_StreamPager> {
                     ),
                   ),
                 _ContinuousWebtoonSlice(
-                  key: ValueKey(item.url),
+                  key: ValueKey('${item.chapterId}_${item.pageIndex}'),
                   item: item,
                 ),
               ],
@@ -1595,6 +1595,7 @@ class _PageSliceImageState extends State<_PageSliceImage> {
           image: imageProvider,
           width: widget.width,
           fit: BoxFit.fitWidth,
+          gaplessPlayback: true,
           filterQuality: FilterQuality.medium,
         );
       },
@@ -1670,7 +1671,7 @@ class _PageSliceImageState extends State<_PageSliceImage> {
   }
 }
 
-class _ContinuousWebtoonSlice extends StatefulWidget {
+class _ContinuousWebtoonSlice extends StatelessWidget {
   const _ContinuousWebtoonSlice({
     super.key,
     required this.item,
@@ -1679,105 +1680,31 @@ class _ContinuousWebtoonSlice extends StatefulWidget {
   final ReaderPageItem item;
 
   @override
-  State<_ContinuousWebtoonSlice> createState() =>
-      _ContinuousWebtoonSliceState();
-}
-
-class _ContinuousWebtoonSliceState extends State<_ContinuousWebtoonSlice> {
-  int _retryNonce = 0;
-  int _autoRetries = 0;
-
-  @override
   Widget build(BuildContext context) {
-    final pageKey = PageCache.keyFor(widget.item.url);
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final urls = item.allUrls;
 
-    return CachedNetworkImage(
-      key: ValueKey('$pageKey#$_retryNonce'),
-      imageUrl: widget.item.url,
-      cacheKey: pageKey,
-      cacheManager: PageCache.instance,
-      httpHeaders: CfSession.imageHeaders(widget.item.url, widget.item.referer),
-      fadeInDuration: Duration.zero,
-      fadeOutDuration: Duration.zero,
-      width: screenWidth,
-      fit: BoxFit.fitWidth,
-      imageBuilder: (context, imageProvider) {
-        return Image(
-          image: imageProvider,
-          width: screenWidth,
-          fit: BoxFit.fitWidth,
-          filterQuality: FilterQuality.medium,
-        );
-      },
-      placeholder: (_, __) => Container(
+    if (urls.length <= 1) {
+      return _PageSliceImage(
+        key: ValueKey(item.url),
+        url: item.url,
         width: screenWidth,
-        height: 260,
-        color: Colors.black,
-        alignment: Alignment.center,
-        child: const SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: Colors.white24,
-          ),
-        ),
-      ),
-      errorWidget: (_, url, error) {
-        CfDiag.log('image slice failed ${Uri.tryParse(url)?.host}: $error');
-        if (_autoRetries < 1) {
-          _autoRetries++;
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            await PageCache.instance.removeFile(pageKey);
-            if (mounted) setState(() => _retryNonce++);
-          });
-          return Container(
+        referer: item.referer,
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final sliceUrl in urls)
+          _PageSliceImage(
+            key: ValueKey(sliceUrl),
+            url: sliceUrl,
             width: screenWidth,
-            height: 180,
-            alignment: Alignment.center,
-            child: const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white24,
-              ),
-            ),
-          );
-        }
-        return Container(
-          width: screenWidth,
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-          color: Colors.black,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.broken_image_rounded,
-                  color: Colors.white30, size: 28),
-              const SizedBox(height: 6),
-              const Text(
-                "Image slice failed to load",
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: () async {
-                  await PageCache.instance.removeFile(pageKey);
-                  if (mounted) setState(() => _retryNonce++);
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                ),
-                child: const Text('Retry', style: TextStyle(fontSize: 12)),
-              ),
-            ],
+            referer: item.referer,
           ),
-        );
-      },
+      ],
     );
   }
 }
